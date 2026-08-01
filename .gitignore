@@ -1,0 +1,38 @@
+# --- Gradle ---
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+.kotlin/
+
+# --- Local machine / IDE / tooling ---
+local.properties
+*.iml
+.idea/
+.vscode/
+.fleet/
+.omo/
+
+# --- Android build outputs ---
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.hprof
+
+# --- Signing (never commit keys) ---
+keystore.properties
+*.jks
+*.keystore
+*.ks
+
+# --- Map and elevation data ---
+# User-supplied via the Storage Access Framework; never part of the source tree.
+*.pmtiles
+*.hgt
+*.osm.pbf
+
+# --- OS noise ---
+.DS_Store
+Thumbs.db
