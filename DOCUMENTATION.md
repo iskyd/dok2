@@ -345,11 +345,20 @@ The region management screen lists what is present and how large it is.
 
 ```xml
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 ```
+
+`ACCESS_NETWORK_STATE` is declared despite the offline design. MapLibre's `ConnectivityReceiver`
+registers for `CONNECTIVITY_CHANGE` on every `MapView` creation and calls
+`ConnectivityManager.getActiveNetworkInfo()` unconditionally; without the permission the handler
+throws `SecurityException` on the main thread, crashing the map screen on any network state
+change. It is a normal (non-runtime) permission that only reads connectivity state — it enables
+no data transfer, and the missing `INTERNET` permission remains the app's exfiltration-proof
+property.
 
 Deliberately absent, and to stay absent:
 

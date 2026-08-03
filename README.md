@@ -1,7 +1,7 @@
 # dok2
 
 An offline GPS track recorder for hiking. Android only.
-It records where you walked, shows you where you are on a map that works with no signal, and keeps everything on the device. No account, no cloud, no network permission.
+It records where you walked, shows you where you are on a map that works with no signal, and keeps everything on the device. No account, no cloud, no network access.
 
 ## What it is not
 
@@ -26,7 +26,7 @@ Pre-alpha. Nothing works yet. See [DOCUMENTATION.md](DOCUMENTATION.md) for the d
 
 ## Getting maps onto the device
 
-The app has no network permission, so it cannot download anything. You supply the data:
+The app has no network access, so it cannot download anything. You supply the data:
 
 1. Build a `.pmtiles` file for your region with [Tilemaker](https://tilemaker.org) from a [Geofabrik](https://download.geofabrik.de) extract.
 2. Download the SRTM `.hgt` tiles covering the same area.
