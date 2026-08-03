@@ -1,0 +1,552 @@
+package dev.iskyd.dok2.recording
+
+import android.app.Notification
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import android.os.SystemClock
+import android.util.Log
+import androidx.core.app.NotificationCompat
+import dev.iskyd.dok2.Dok2Application
+import dev.iskyd.dok2.MainActivity
+import dev.iskyd.dok2.R
+import dev.iskyd.dok2.data.CoordinateCodec
+import dev.iskyd.dok2.data.db.WaypointEntity
+import dev.iskyd.dok2.data.repo.TrackRepository
+import dev.iskyd.dok2.domain.elevation.Barometer
+import dev.iskyd.dok2.domain.elevation.ElevationStats
+import dev.iskyd.dok2.domain.filter.FilterChain
+import dev.iskyd.dok2.domain.filter.FilterResult
+import dev.iskyd.dok2.domain.model.GpsFix
+import dev.iskyd.dok2.domain.model.PointState
+import dev.iskyd.dok2.domain.model.RecordingState
+import dev.iskyd.dok2.domain.model.TrackPoint
+import dev.iskyd.dok2.domain.state.PauseEvent
+import dev.iskyd.dok2.domain.state.RecordingStateMachine
+import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import org.maplibre.android.geometry.LatLng
+
+/**
+ * The source of truth for recording state and the app's only location consumer.
+ *
+ * The service owns the full recording pipeline: GNSS fixes (GPS provider only, never network or
+ * Play Services), barometer samples, the [FilterChain], the [RecordingStateMachine], and track
+ * persistence through [TrackRepository]. The UI observes [RecordingStateHolder] and never writes
+ * recording state; the service runs correctly with no UI process alive.
+ *
+ * Timestamps always come from the fix or the sensor, never from the clock at callback time
+ * (AGENTS.md). The only `System.currentTimeMillis()` calls are for user-initiated actions, which
+ * have no sensor timestamp.
+ */
+class RecordingService : Service() {
+
+    private lateinit var app: Dok2Application
+
+    private lateinit var trackRepository: TrackRepository
+
+    private lateinit var locationManager: LocationManager
+
+    private lateinit var sensorManager: SensorManager
+
+    private var pressureSensor: Sensor? = null
+
+    /** Runs all state-machine and persistence work; cancelled in [onDestroy]. */
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    private val stateMachine = RecordingStateMachine()
+
+    private val filterChain = FilterChain()
+
+    private val barometer = Barometer()
+
+    private val elevationStats = ElevationStats()
+
+    /** Points awaiting a batched [TrackRepository.appendPoints] write (10 points / ~30 s). */
+    private val pointBuffer = mutableListOf<TrackPoint>()
+
+    private var trackId: Long? = null
+
+    private var latestBarometerPressure: Double? = null
+
+    /** The most recent fix, used for the Waypoint action. */
+    private var lastFix: GpsFix? = null
+
+    private var requestedIntervalMs: Long = RecordingStateMachine.GNSS_INTERVAL_MS
+
+    private var waypointFlashUntilMs = 0L
+
+    private val handler = Handler(Looper.getMainLooper())
+
+    private val revertWaypointFlash = Runnable { updateNotification() }
+
+    override fun onCreate() {
+        super.onCreate()
+        app = application as Dok2Application
+        trackRepository = app.trackRepository
+        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        pressureSensor = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE)
+        RecordingNotifications.ensureChannel(this)
+        stateMachine.addListener(::onStateTransition)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForegroundServiceCompat()
+        when (intent?.action) {
+            ACTION_START -> startRecording()
+            ACTION_PAUSE_RESUME -> togglePauseResume()
+            ACTION_WAYPOINT -> saveWaypoint()
+            ACTION_STOP -> stopRecording()
+        }
+        return START_STICKY
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        serviceScope.cancel()
+        sensorManager.unregisterListener(pressureListener)
+        locationManager.removeUpdates(locationListener)
+        super.onDestroy()
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Recording lifecycle
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Starts recording, resuming into an existing open track (after a reboot or watchdog restart)
+     * or creating a new one. [TrackRepository.startTrack] is only called when no open track exists.
+     */
+    private fun startRecording() {
+        val currentTrackId = trackId
+        if (currentTrackId != null) {
+            Log.d(TAG, "start requested while recording into track $currentTrackId; ignoring")
+            return
+        }
+        serviceScope.launch {
+            try {
+                val now = System.currentTimeMillis()
+                val openTrack = trackRepository.getOpenTrack()
+                val id = openTrack?.id ?: trackRepository.startTrack(now, name = null)
+                trackId = id
+                RecordingStateHolder.setOpenTrackId(id)
+                beginRecordingSession(id, now)
+            } catch (error: Exception) {
+                Log.e(TAG, "failed to start recording", error)
+                stopSelf()
+            }
+        }
+    }
+
+    private fun beginRecordingSession(id: Long, now: Long) {
+        stateMachine.start(now)
+        filterChain.reset()
+        barometer.reset()
+        elevationStats.reset()
+        pointBuffer.clear()
+        latestBarometerPressure = null
+        lastFix = null
+        requestedIntervalMs = RecordingStateMachine.GNSS_INTERVAL_MS
+        RecordingStateHolder.setDistance(0.0)
+        RecordingStateHolder.setCurrentAltitude(null)
+        RecordingStateHolder.setLastLatLng(null)
+        RecordingStateHolder.setLastFixMs(null)
+        scheduleWatchdog(this)
+        registerPressureSensor()
+        requestLocationUpdates(requestedIntervalMs)
+        updateNotification()
+        Log.d(TAG, "recording started into track $id")
+    }
+
+    private fun togglePauseResume() {
+        val id = trackId ?: return
+        val now = System.currentTimeMillis()
+        when (stateMachine.state) {
+            RecordingState.ManualPaused -> stateMachine.userResume(now)
+            RecordingState.Recording,
+            RecordingState.AutoPaused -> stateMachine.userPause(now)
+            RecordingState.Idle -> return
+        }
+        refreshLocationUpdateInterval()
+        updateNotification()
+    }
+
+    private fun saveWaypoint() {
+        val id = trackId ?: return
+        val fix = lastFix ?: return
+        val database = app.database
+        serviceScope.launch {
+            try {
+                database
+                    .waypointDao()
+                    .insert(
+                        WaypointEntity(
+                            trackId = id,
+                            tMs = fix.tMs,
+                            latE7 = CoordinateCodec.toE7(fix.latDeg),
+                            lonE7 = CoordinateCodec.toE7(fix.lonDeg),
+                        )
+                    )
+            } catch (error: Exception) {
+                Log.e(TAG, "waypoint insert failed", error)
+            }
+        }
+        // Simplest correct confirmation: flash the text in the main notification for 3 seconds.
+        waypointFlashUntilMs = System.currentTimeMillis() + WAYPOINT_FLASH_MS
+        handler.removeCallbacks(revertWaypointFlash)
+        handler.postDelayed(revertWaypointFlash, WAYPOINT_FLASH_MS)
+        updateNotification()
+    }
+
+    private fun stopRecording() {
+        val id = trackId ?: return
+        serviceScope.launch {
+            try {
+                val now = System.currentTimeMillis()
+                stateMachine.stop(now)
+                val remaining = pointBuffer.toList()
+                pointBuffer.clear()
+                trackRepository.appendPoints(id, remaining)
+                finalizeTrack(id, now)
+                teardownRecording()
+            } catch (error: Exception) {
+                Log.e(TAG, "failed to finalise track $id", error)
+                teardownRecording()
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Fix pipeline
+    // ---------------------------------------------------------------------------------------------
+
+    private fun handleFix(location: Location) {
+        val id = trackId ?: return
+        val fix =
+            GpsFix(
+                tMs = location.time,
+                latDeg = location.latitude,
+                lonDeg = location.longitude,
+                accuracyM = location.accuracy.toDouble(),
+                altGnssM = if (location.hasAltitude()) location.altitude else null,
+                speedMps = if (location.hasSpeed()) location.speed.toDouble() else null,
+                bearingDeg = if (location.hasBearing()) location.bearing.toDouble() else null,
+                pressureHpa = latestBarometerPressure,
+            )
+        lastFix = fix
+
+        val altGnssM = fix.altGnssM
+        if (altGnssM != null) {
+            barometer.onGnssAltitude(fix.tMs, altGnssM, fix.accuracyM)
+        }
+
+        val result = filterChain.onFix(fix, stateMachine.state.pointState ?: PointState.RECORDING)
+        when (result) {
+            is FilterResult.Accepted -> {
+                stateMachine.fixAccepted(fix.tMs)
+                bufferPoint(result.point)
+            }
+            is FilterResult.Stationary -> bufferPoint(result.point)
+            is FilterResult.Rejected ->
+                Log.d(TAG, "fix rejected at ${fix.tMs}: ${result.rejectionReason}")
+        }
+
+        // Gain/loss accumulate only in RECORDING; elapsed time accumulates in all non-idle states.
+        if (stateMachine.state == RecordingState.Recording) {
+            barometer.currentBarometricAltitudeM?.let { elevationStats.add(it) }
+        }
+
+        stateMachine.autoPauseTimeout(fix.tMs)
+
+        RecordingStateHolder.setLastFixMs(fix.tMs)
+        RecordingStateHolder.setDistance(filterChain.accumulatedDistanceM)
+        RecordingStateHolder.setCurrentAltitude(barometer.currentBarometricAltitudeM)
+        RecordingStateHolder.setLastLatLng(LatLng(fix.latDeg, fix.lonDeg))
+
+        refreshLocationUpdateInterval()
+    }
+
+    private fun bufferPoint(point: TrackPoint) {
+        pointBuffer += point
+        if (pointBuffer.size >= POINT_BUFFER_SIZE) {
+            flushPoints()
+        }
+    }
+
+    private fun flushPoints() {
+        val id = trackId ?: return
+        if (pointBuffer.isEmpty()) return
+        val batch = pointBuffer.toList()
+        pointBuffer.clear()
+        serviceScope.launch {
+            try {
+                trackRepository.appendPoints(id, batch)
+            } catch (error: Exception) {
+                Log.e(TAG, "point batch persistence failed", error)
+            }
+        }
+    }
+
+    /**
+     * Requests location updates at the interval the state machine currently wants (3 s, dropping to
+     * 30 s after 2 minutes of manual pause). Re-requested whenever that interval changes.
+     */
+    private fun requestLocationUpdates(minTimeMs: Long) {
+        try {
+            locationManager.removeUpdates(locationListener)
+            locationManager.requestLocationUpdates(
+                LocationManager.GPS_PROVIDER,
+                minTimeMs,
+                0f,
+                locationListener,
+                Looper.getMainLooper(),
+            )
+        } catch (error: SecurityException) {
+            Log.e(TAG, "location permission unavailable; stopping recording", error)
+            stopRecording()
+        }
+    }
+
+    private fun refreshLocationUpdateInterval() {
+        val now = System.currentTimeMillis()
+        val interval = stateMachine.gnssIntervalMsAt(now)
+        if (interval != requestedIntervalMs) {
+            requestedIntervalMs = interval
+            requestLocationUpdates(interval)
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Finalisation
+    // ---------------------------------------------------------------------------------------------
+
+    private suspend fun finalizeTrack(id: Long, endedAtMs: Long) {
+        val points = trackRepository.getPoints(id)
+        val demDirectory = File(filesDir, "dem").apply { mkdirs() }
+        val altDemBySeq = LinkedHashMap<Long, Double>()
+        for ((seq, point) in points.withIndex()) {
+            // DemTileRepository caches the last loaded cell, so per-point lookups are cheap.
+            val reader =
+                app.demTileRepository.loadHgt(point.latDeg, point.lonDeg, demDirectory) ?: continue
+            val altDemM = reader.altitudeAt(point.latDeg, point.lonDeg)
+            if (altDemM != null) {
+                altDemBySeq[seq.toLong()] = altDemM
+            }
+        }
+        trackRepository.updateDemAltitudes(id, altDemBySeq)
+
+        val demStats = ElevationStats()
+        for (altDemM in altDemBySeq.values) {
+            demStats.add(altDemM)
+        }
+        val hasDem = altDemBySeq.isNotEmpty()
+        val barometerFed = elevationStats.referenceM != null
+
+        trackRepository.finalizeTrack(
+            trackId = id,
+            endedAtMs = endedAtMs,
+            distanceM = filterChain.accumulatedDistanceM,
+            movingTimeS = stateMachine.movingTimeMs / 1000,
+            elapsedTimeS = stateMachine.elapsedTimeMs / 1000,
+            gainBaroM = if (barometerFed) elevationStats.gainM else null,
+            lossBaroM = if (barometerFed) elevationStats.lossM else null,
+            gainDemM = if (hasDem) demStats.gainM else null,
+            lossDemM = if (hasDem) demStats.lossM else null,
+            seaLevelHpa = barometer.seaLevelHpa,
+            calibrated = barometer.calibrated,
+        )
+    }
+
+    private fun teardownRecording() {
+        cancelWatchdog(this)
+        sensorManager.unregisterListener(pressureListener)
+        locationManager.removeUpdates(locationListener)
+        pointBuffer.clear()
+        trackId = null
+        lastFix = null
+        latestBarometerPressure = null
+        requestedIntervalMs = RecordingStateMachine.GNSS_INTERVAL_MS
+        RecordingStateHolder.reset()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Sensors
+    // ---------------------------------------------------------------------------------------------
+
+    private fun registerPressureSensor() {
+        val sensor = pressureSensor ?: return
+        val registered =
+            sensorManager.registerListener(pressureListener, sensor, SensorManager.SENSOR_DELAY_UI)
+        if (!registered) {
+            Log.w(TAG, "pressure sensor registration failed")
+        }
+    }
+
+    private fun unregisterPressureSensor() {
+        sensorManager.unregisterListener(pressureListener)
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Listeners
+    // ---------------------------------------------------------------------------------------------
+
+    private val locationListener =
+        object : LocationListener {
+            override fun onLocationChanged(location: Location) {
+                handleFix(location)
+            }
+
+            override fun onProviderEnabled(provider: String) = Unit
+
+            override fun onProviderDisabled(provider: String) = Unit
+
+            @Deprecated("Deprecated in the framework; no longer delivered on modern Android.")
+            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
+        }
+
+    private val pressureListener =
+        object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                // Sensor timestamps are nanoseconds since boot; convert to epoch millis.
+                val tMs =
+                    (event.timestamp / 1_000_000L) +
+                        (System.currentTimeMillis() - SystemClock.elapsedRealtime())
+                val pressureHpa = event.values[0].toDouble()
+                latestBarometerPressure = pressureHpa
+                barometer.onPressure(tMs, pressureHpa)
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+        }
+
+    /**
+     * Persists every state-machine transition to `pause_events` and mirrors it to
+     * [RecordingStateHolder]. The Idle transition (stop) is skipped — finalisation handles stop.
+     */
+    private fun onStateTransition(event: PauseEvent) {
+        val id = trackId
+        if (id != null) {
+            val pointState = event.newState.pointState
+            if (pointState != null) {
+                serviceScope.launch {
+                    try {
+                        trackRepository.appendPauseEvents(id, listOf(event.tMs to pointState))
+                    } catch (error: Exception) {
+                        Log.e(TAG, "pause event persistence failed", error)
+                    }
+                }
+            }
+        }
+        RecordingStateHolder.setState(event.newState)
+        // Moving time + segment anchor for the Live screen's clock; the anchor is what keeps the
+        // clock exact between transitions, so the two must always be pushed together.
+        RecordingStateHolder.setMovingTimeMs(stateMachine.movingTimeMs)
+        RecordingStateHolder.setMovingTimeSegmentStartMs(stateMachine.segmentStartMs)
+        if (id != null) {
+            updateNotification()
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Foreground notification
+    // ---------------------------------------------------------------------------------------------
+
+    private fun startForegroundServiceCompat() {
+        val notification = buildNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
+            )
+        } else {
+            // API 29-33 use the two-arg form; the manifest declares the location type.
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun buildNotification(): Notification {
+        val contentText =
+            if (System.currentTimeMillis() < waypointFlashUntilMs) {
+                "Waypoint saved"
+            } else {
+                when (stateMachine.state) {
+                    RecordingState.Recording -> "Recording"
+                    RecordingState.AutoPaused -> "Auto-paused"
+                    RecordingState.ManualPaused -> "Paused"
+                    RecordingState.Idle -> "Idle"
+                }
+            }
+        val pauseLabel =
+            when (stateMachine.state) {
+                RecordingState.ManualPaused -> "Resume"
+                else -> "Pause"
+            }
+        val contentIntent =
+            PendingIntent.getActivity(
+                this,
+                0,
+                Intent(this, MainActivity::class.java),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+        return NotificationCompat.Builder(this, RecordingNotifications.CHANNEL_RECORDING)
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(contentText)
+            .setContentIntent(contentIntent)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .addAction(0, pauseLabel, servicePendingIntent(ACTION_PAUSE_RESUME))
+            .addAction(0, "Waypoint", servicePendingIntent(ACTION_WAYPOINT))
+            .addAction(0, "Stop", servicePendingIntent(ACTION_STOP))
+            .build()
+    }
+
+    private fun servicePendingIntent(action: String): PendingIntent =
+        PendingIntent.getService(
+            this,
+            action.hashCode(),
+            Intent(this, RecordingService::class.java).setAction(action),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+    private fun updateNotification() {
+        val notificationManager =
+            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(NOTIFICATION_ID, buildNotification())
+    }
+
+    companion object {
+        const val ACTION_START = "dev.iskyd.dok2.recording.action.START"
+        const val ACTION_PAUSE_RESUME = "dev.iskyd.dok2.recording.action.PAUSE_RESUME"
+        const val ACTION_WAYPOINT = "dev.iskyd.dok2.recording.action.WAYPOINT"
+        const val ACTION_STOP = "dev.iskyd.dok2.recording.action.STOP"
+        const val NOTIFICATION_ID = 1
+        private const val TAG = "RecordingService"
+        private const val POINT_BUFFER_SIZE = 10
+        private const val WAYPOINT_FLASH_MS = 3_000L
+    }
+}

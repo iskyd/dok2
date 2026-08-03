@@ -1,0 +1,76 @@
+package dev.iskyd.dok2.data.prefs
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.floatPreferencesKey
+import java.io.IOException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
+
+/**
+ * The persisted user settings.
+ *
+ * @property privacyZoneEnabled whether exported tracks are trimmed within [privacyZoneRadiusM] of
+ *   the start point (the home privacy zone). Off by default — the one privacy feature people
+ *   actually need.
+ * @property privacyZoneRadiusM the radius of the privacy zone in metres.
+ * @property stripExifOnExport whether photo EXIF GPS data is stripped when exporting. On by
+ *   default.
+ */
+data class AppSettings(
+    val privacyZoneEnabled: Boolean = false,
+    val privacyZoneRadiusM: Float = 500f,
+    val stripExifOnExport: Boolean = true,
+)
+
+/**
+ * Reads and writes [AppSettings] via DataStore Preferences.
+ *
+ * The [DataStore] instance is injected so this class holds no [Context] of its own; `:app` owns the
+ * `Context.dataStore` delegate (one instance per preferences file name) and passes it in at wiring
+ * time.
+ */
+class SettingsRepository(private val dataStore: DataStore<Preferences>) {
+
+    /** The current settings, re-emitted whenever any key changes. */
+    val settingsFlow: Flow<AppSettings> =
+        dataStore.data
+            .catch { error -> if (error is IOException) emit(emptyPreferences()) else throw error }
+            .map { prefs ->
+                AppSettings(
+                    privacyZoneEnabled =
+                        prefs[KEY_PRIVACY_ZONE_ENABLED] ?: DEFAULT_SETTINGS.privacyZoneEnabled,
+                    privacyZoneRadiusM =
+                        prefs[KEY_PRIVACY_ZONE_RADIUS_M] ?: DEFAULT_SETTINGS.privacyZoneRadiusM,
+                    stripExifOnExport =
+                        prefs[KEY_STRIP_EXIF_ON_EXPORT] ?: DEFAULT_SETTINGS.stripExifOnExport,
+                )
+            }
+
+    /** Enables or disables the privacy zone. */
+    suspend fun setPrivacyZoneEnabled(enabled: Boolean) {
+        dataStore.edit { it[KEY_PRIVACY_ZONE_ENABLED] = enabled }
+    }
+
+    /** Sets the privacy zone radius in metres. */
+    suspend fun setPrivacyZoneRadiusM(radiusM: Float) {
+        dataStore.edit { it[KEY_PRIVACY_ZONE_RADIUS_M] = radiusM }
+    }
+
+    /** Sets whether photo EXIF GPS data is stripped on export. */
+    suspend fun setStripExifOnExport(strip: Boolean) {
+        dataStore.edit { it[KEY_STRIP_EXIF_ON_EXPORT] = strip }
+    }
+
+    private companion object {
+        val KEY_PRIVACY_ZONE_ENABLED = booleanPreferencesKey("privacy_zone_enabled")
+        val KEY_PRIVACY_ZONE_RADIUS_M = floatPreferencesKey("privacy_zone_radius_m")
+        val KEY_STRIP_EXIF_ON_EXPORT = booleanPreferencesKey("strip_exif_on_export")
+        val DEFAULT_SETTINGS = AppSettings()
+    }
+}

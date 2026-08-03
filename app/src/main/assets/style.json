@@ -1,0 +1,15 @@
+{
+  "version": 8,
+  "name": "dok2",
+  "sprite": "asset://sprites",
+  "sources": {},
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#f4f1e8"
+      }
+    }
+  ]
+}
