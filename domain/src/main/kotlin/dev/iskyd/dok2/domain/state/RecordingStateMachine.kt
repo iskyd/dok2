@@ -63,8 +63,8 @@ class RecordingStateMachine {
 
     /**
      * Epoch millis the current state segment started. While [RecordingState.Recording] the segment
-     * is the in-progress moving-time span, so the live clock can render exactly as
-     * `movingTimeMs + (now - segmentStartMs)` without a UI-side accumulator.
+     * is the in-progress moving-time span, so the live clock can render exactly as `movingTimeMs +
+     * (now - segmentStartMs)` without a UI-side accumulator.
      */
     val segmentStartMs: Long?
         get() = segmentStartMsValue

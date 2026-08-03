@@ -41,6 +41,28 @@ object RecordingStateHolder {
     /** The current barometric altitude in metres, or null before the first pressure sample. */
     val currentAltitudeM: StateFlow<Double?> = _currentAltitudeM
 
+    private val _barometerCalibrated = MutableStateFlow(false)
+
+    /**
+     * True once the barometer baseline has been solved against GNSS altitudes. While false the
+     * displayed altitude uses the fallback sea-level pressure and can be off by tens to hundreds of
+     * metres; the UI shows a calibrating hint.
+     */
+    val barometerCalibrated: StateFlow<Boolean> = _barometerCalibrated
+
+    private val _elevationGainM = MutableStateFlow<Double?>(null)
+
+    /**
+     * Accumulated barometric ascent in metres for the current track, or null before the first fix.
+     * Mirrors the 5 m hysteresis accumulator and freezes while paused, exactly like [distanceM].
+     */
+    val elevationGainM: StateFlow<Double?> = _elevationGainM
+
+    private val _elevationLossM = MutableStateFlow<Double?>(null)
+
+    /** Accumulated barometric descent in metres; same lifecycle as [elevationGainM]. */
+    val elevationLossM: StateFlow<Double?> = _elevationLossM
+
     private val _lastLatLng = MutableStateFlow<LatLng?>(null)
 
     /** The most recent GNSS position, for the map's camera-follow. */
@@ -91,6 +113,18 @@ object RecordingStateHolder {
         _currentAltitudeM.value = altitudeM
     }
 
+    internal fun setBarometerCalibrated(calibrated: Boolean) {
+        _barometerCalibrated.value = calibrated
+    }
+
+    internal fun setElevationGainM(gainM: Double?) {
+        _elevationGainM.value = gainM
+    }
+
+    internal fun setElevationLossM(lossM: Double?) {
+        _elevationLossM.value = lossM
+    }
+
     internal fun setLastLatLng(latLng: LatLng?) {
         _lastLatLng.value = latLng
     }
@@ -102,6 +136,9 @@ object RecordingStateHolder {
         _openTrackId.value = null
         _distanceM.value = 0.0
         _currentAltitudeM.value = null
+        _barometerCalibrated.value = false
+        _elevationGainM.value = null
+        _elevationLossM.value = null
         _lastLatLng.value = null
         _movingTimeMs.value = 0L
         _movingTimeSegmentStartMs.value = null

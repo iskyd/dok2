@@ -49,6 +49,16 @@ class ElevationStats(private val hysteresisM: Double = 5.0) {
         }
     }
 
+    /**
+     * Re-anchors the hysteresis reference to [altM] without touching accumulated gain/loss. Used
+     * when the barometer completes GNSS calibration: the baseline jumps by the calibration error,
+     * and reseeding before the next sample prevents that jump from being recorded as a phantom
+     * gain/loss step.
+     */
+    fun reseed(altM: Double) {
+        refM = altM
+    }
+
     /** Resets the accumulator for a new track. */
     fun reset() {
         refM = null

@@ -44,6 +44,9 @@ fun LiveScreen() {
     val state by RecordingStateHolder.state.collectAsState()
     val distanceM by RecordingStateHolder.distanceM.collectAsState()
     val altitudeM by RecordingStateHolder.currentAltitudeM.collectAsState()
+    val elevationGainM by RecordingStateHolder.elevationGainM.collectAsState()
+    val elevationLossM by RecordingStateHolder.elevationLossM.collectAsState()
+    val barometerCalibrated by RecordingStateHolder.barometerCalibrated.collectAsState()
     val movingTimeMs by RecordingStateHolder.movingTimeMs.collectAsState()
     val movingSegmentStartMs by RecordingStateHolder.movingTimeSegmentStartMs.collectAsState()
     var confirmStop by remember { mutableStateOf(false) }
@@ -61,7 +64,8 @@ fun LiveScreen() {
                     val segmentStart = movingSegmentStartMs
                     value =
                         if (state == RecordingState.Recording && segmentStart != null) {
-                            movingTimeMs + (System.currentTimeMillis() - segmentStart).coerceAtLeast(0)
+                            movingTimeMs +
+                                (System.currentTimeMillis() - segmentStart).coerceAtLeast(0)
                         } else {
                             movingTimeMs
                         }
@@ -84,7 +88,43 @@ fun LiveScreen() {
         Text(text = formatDistance(distanceM), style = MaterialTheme.typography.headlineSmall)
         altitudeM?.let {
             Spacer(Modifier.height(4.dp))
-            Text(text = "${it.toInt()} m", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text =
+                    if (barometerCalibrated) {
+                        "${it.toInt()} m"
+                    } else {
+                        "${it.toInt()} m · calibrating…"
+                    },
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
+        // Ascent/descent come from the same barometric accumulator and are only meaningful when a
+        // barometric altitude exists; the row is hidden on barometer-less devices.
+        val gainM = elevationGainM
+        val lossM = elevationLossM
+        if (altitudeM != null && gainM != null && lossM != null) {
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    text = if (barometerCalibrated) "▲ ${formatDistance(gainM)}" else "▲ —",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = if (barometerCalibrated) "▼ ${formatDistance(lossM)}" else "▼ —",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+        // The first minute of every recording the barometer solves its baseline against GNSS
+        // altitudes; until then the shown altitude is a fallback estimate.
+        if (state != RecordingState.Idle && !barometerCalibrated) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Altitude calibrating — needs ~1 min with clear sky.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
         }
         Spacer(Modifier.height(4.dp))
         Text(

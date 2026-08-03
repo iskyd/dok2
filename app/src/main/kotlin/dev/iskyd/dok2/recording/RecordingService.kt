@@ -88,6 +88,11 @@ class RecordingService : Service() {
 
     private var latestBarometerPressure: Double? = null
 
+    /**
+     * Tracks the false→true edge of GNSS calibration so the accumulator is reseeded exactly once.
+     */
+    private var wasBarometerCalibrated = false
+
     /** The most recent fix, used for the Waypoint action. */
     private var lastFix: GpsFix? = null
 
@@ -166,6 +171,7 @@ class RecordingService : Service() {
         elevationStats.reset()
         pointBuffer.clear()
         latestBarometerPressure = null
+        wasBarometerCalibrated = false
         lastFix = null
         requestedIntervalMs = RecordingStateMachine.GNSS_INTERVAL_MS
         RecordingStateHolder.setDistance(0.0)
@@ -273,6 +279,12 @@ class RecordingService : Service() {
         }
 
         // Gain/loss accumulate only in RECORDING; elapsed time accumulates in all non-idle states.
+        // When GNSS calibration completes, the baseline snaps and the next sample would record a
+        // phantom step of the jump size; reseeding re-anchors the reference first.
+        if (barometer.calibrated && !wasBarometerCalibrated) {
+            barometer.currentBarometricAltitudeM?.let { elevationStats.reseed(it) }
+        }
+        wasBarometerCalibrated = barometer.calibrated
         if (stateMachine.state == RecordingState.Recording) {
             barometer.currentBarometricAltitudeM?.let { elevationStats.add(it) }
         }
@@ -282,6 +294,11 @@ class RecordingService : Service() {
         RecordingStateHolder.setLastFixMs(fix.tMs)
         RecordingStateHolder.setDistance(filterChain.accumulatedDistanceM)
         RecordingStateHolder.setCurrentAltitude(barometer.currentBarometricAltitudeM)
+        RecordingStateHolder.setBarometerCalibrated(barometer.calibrated)
+        // Gain/loss mirror the 5 m hysteresis accumulator at the same cadence as distance; the
+        // values are already frozen while paused because the accumulator only runs in RECORDING.
+        RecordingStateHolder.setElevationGainM(elevationStats.gainM)
+        RecordingStateHolder.setElevationLossM(elevationStats.lossM)
         RecordingStateHolder.setLastLatLng(LatLng(fix.latDeg, fix.lonDeg))
 
         refreshLocationUpdateInterval()

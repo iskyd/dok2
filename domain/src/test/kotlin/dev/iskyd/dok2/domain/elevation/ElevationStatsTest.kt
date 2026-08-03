@@ -74,6 +74,19 @@ class ElevationStatsTest {
     }
 
     @Test
+    fun `reseed re-anchors without recording the calibration jump`() {
+        val stats = ElevationStats()
+        stats.add(100.0)
+        stats.add(110.0) // +10 -> gain 10
+        stats.reseed(30.0) // barometer calibration snaps the baseline by 80 m
+        stats.add(45.0) // +15 from the reseeded reference -> gain 15
+
+        assertThat(stats.gainM).isWithin(1e-9).of(25.0)
+        assertThat(stats.lossM).isEqualTo(0.0)
+        assertThat(stats.referenceM).isEqualTo(45.0)
+    }
+
+    @Test
     fun `reset clears the accumulator`() {
         val stats = ElevationStats()
         stats.add(100.0)
