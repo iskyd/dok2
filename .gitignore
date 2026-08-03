@@ -11,6 +11,8 @@ local.properties
 .vscode/
 .fleet/
 .omo/
+.envrc
+.direnv/
 
 # --- Android build outputs ---
 captures/
