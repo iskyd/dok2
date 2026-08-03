@@ -18,12 +18,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -62,8 +64,10 @@ fun LibraryScreen(trackRepository: TrackRepository) {
     val scope = rememberCoroutineScope()
     val summaries by trackRepository.observeTrackSummaries().collectAsState(initial = emptyList())
     val recordingState by RecordingStateHolder.state.collectAsState()
+    val liveTrackId by RecordingStateHolder.openTrackId.collectAsState()
     var openTrack by remember { mutableStateOf<Track?>(null) }
     var refreshKey by remember { mutableIntStateOf(0) }
+    var trackToDelete by remember { mutableStateOf<TrackSummary?>(null) }
 
     LaunchedEffect(refreshKey, trackRepository) { openTrack = trackRepository.getOpenTrack() }
 
@@ -92,8 +96,44 @@ fun LibraryScreen(trackRepository: TrackRepository) {
             contentPadding = PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(summaries, key = { it.id }) { summary -> TrackCard(summary) }
+            items(summaries, key = { it.id }) { summary ->
+                // The track being recorded into must not be deletable.
+                TrackCard(
+                    summary = summary,
+                    canDelete = summary.id != liveTrackId,
+                    onDelete = { trackToDelete = summary },
+                )
+            }
         }
+    }
+
+    trackToDelete?.let { summary ->
+        AlertDialog(
+            onDismissRequest = { trackToDelete = null },
+            title = { Text("Delete track?") },
+            text = {
+                Text(
+                    "${summary.name ?: formatDate(summary.startedAtMs)} — " +
+                        "This removes the track and all its points. This cannot be undone."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        trackToDelete = null
+                        scope.launch {
+                            trackRepository.deleteTrack(summary.id)
+                            // Reload getOpenTrack() only after the delete commits, so a deleted
+                            // open track cannot leave a stale banner behind.
+                            refreshKey++
+                        }
+                    }
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { trackToDelete = null }) { Text("Cancel") } },
+        )
     }
 }
 
@@ -122,7 +162,7 @@ private fun OpenTrackBanner(track: Track, onResume: () -> Unit, onFinalise: () -
 }
 
 @Composable
-private fun TrackCard(summary: TrackSummary) {
+private fun TrackCard(summary: TrackSummary, canDelete: Boolean, onDelete: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -159,6 +199,12 @@ private fun TrackCard(summary: TrackSummary) {
                         text = "▲ ${formatDistance(it)}",
                         style = MaterialTheme.typography.bodySmall,
                     )
+                }
+            }
+            Spacer(Modifier.width(4.dp))
+            if (canDelete) {
+                TextButton(onClick = onDelete) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
             }
         }
