@@ -8,6 +8,14 @@ import kotlin.math.pow
  *
  * Standard formula: `altitude = 44330 × (1 − (p / p0)^(1/5.255))`.
  *
+ * **Smoothing.** A MEMS barometer's instantaneous samples are noisy: a footstep, a gust across the
+ * sensor port, or the phone bouncing in a pocket produces pressure spikes of 1–2 hPa (≈8–16 m) that
+ * last a fraction of a second. The altitude is therefore computed from the median of the last
+ * [Config.medianWindowSize] samples (~2 s at the 5 Hz production rate), not from a single sample. A
+ * spike occupies at most a few window slots and cannot move the median. Without this, spikes
+ * regularly exceed the 5 m hysteresis and the accumulator books hundreds of metres of phantom gain
+ * on a flat walk.
+ *
  * **Calibration.** For the first 60 seconds after [start], good GNSS altitudes (accuracy better
  * than 15 m) and the concurrent pressure samples are collected. When the window closes, the medians
  * are used to solve for `p0` so the barometric altitude matches the GNSS altitude. If no usable
@@ -29,7 +37,7 @@ import kotlin.math.pow
 class Barometer(private val config: Config = Config.DEFAULT) {
 
     /**
-     * Tuning constants for calibration and drift correction.
+     * Tuning constants for calibration, smoothing and drift correction.
      *
      * @property calibrationWindowMs how long the initial GNSS altitude collection lasts.
      * @property goodAccuracyMaxM altitudes with accuracy better than this are "good".
@@ -40,6 +48,8 @@ class Barometer(private val config: Config = Config.DEFAULT) {
      * @property kDrift the fraction of the drift error applied per correction step — 1/6 over a
      *   5-minute step gives roughly the documented 30-minute time constant.
      * @property maxDriftStepHpa the per-step clamp on the baseline correction.
+     * @property medianWindowSize how many of the most recent pressure samples are medianed before
+     *   computing an altitude. 10 samples ≈ 2 s at the 5 Hz production rate.
      */
     data class Config(
         val calibrationWindowMs: Long = 60_000L,
@@ -49,6 +59,7 @@ class Barometer(private val config: Config = Config.DEFAULT) {
         val driftWindowCount: Int = 10,
         val kDrift: Double = 1.0 / 6.0,
         val maxDriftStepHpa: Double = 0.5,
+        val medianWindowSize: Int = 10,
     ) {
         companion object {
             /** The production configuration. */
@@ -60,12 +71,12 @@ class Barometer(private val config: Config = Config.DEFAULT) {
     private var started: Boolean = false
     private var startTMs: Long = 0L
     private var calibratedValue: Boolean = false
-    private var latestPressureHpa: Double? = null
     private var lastDriftTMs: Long? = null
 
     private val calibrationGnssAlts = mutableListOf<Double>()
     private val calibrationPressures = mutableListOf<Double>()
     private val driftAlts = ArrayDeque<Double>()
+    private val pressureWindow = ArrayDeque<Double>()
 
     /** The current sea-level pressure `p0` in hPa. */
     val seaLevelHpa: Double
@@ -76,11 +87,11 @@ class Barometer(private val config: Config = Config.DEFAULT) {
         get() = calibratedValue
 
     /**
-     * The current barometric altitude in metres, derived from the latest pressure sample and
-     * [seaLevelHpa], or null before any pressure sample arrives.
+     * The current barometric altitude in metres, derived from the median of the most recent
+     * pressure samples and [seaLevelHpa], or null before any pressure sample arrives.
      */
     val currentBarometricAltitudeM: Double?
-        get() = latestPressureHpa?.let { altitudeFrom(it, p0) }
+        get() = median(pressureWindow.toList())?.let { altitudeFrom(it, p0) }
 
     /**
      * Starts the calibration window. The service calls this when recording starts; if it is not
@@ -92,10 +103,16 @@ class Barometer(private val config: Config = Config.DEFAULT) {
         startTMs = tMs
     }
 
-    /** Feeds a barometer pressure sample in hPa. */
+    /**
+     * Feeds a barometer pressure sample in hPa. Raw samples are kept for calibration; the median
+     * window used for altitudes is maintained internally.
+     */
     fun onPressure(tMs: Long, pressureHpa: Double) {
         if (!started) start(tMs)
-        latestPressureHpa = pressureHpa
+        pressureWindow.addLast(pressureHpa)
+        while (pressureWindow.size > config.medianWindowSize) {
+            pressureWindow.removeFirst()
+        }
         if (!calibratedValue && tMs < startTMs + config.calibrationWindowMs) {
             calibrationPressures += pressureHpa
         }
@@ -133,11 +150,11 @@ class Barometer(private val config: Config = Config.DEFAULT) {
         started = false
         startTMs = 0L
         calibratedValue = false
-        latestPressureHpa = null
         lastDriftTMs = null
         calibrationGnssAlts.clear()
         calibrationPressures.clear()
         driftAlts.clear()
+        pressureWindow.clear()
     }
 
     private fun calibrate() {

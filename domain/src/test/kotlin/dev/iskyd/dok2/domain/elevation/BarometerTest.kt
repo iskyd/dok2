@@ -83,6 +83,38 @@ class BarometerTest {
     }
 
     @Test
+    fun `median window rejects single-sample pressure spikes`() {
+        val barometer = Barometer()
+        barometer.start(0)
+        // Steady 1000.0 hPa with one 8 hPa (≈67 m) spike in the middle. The median of the
+        // 10-sample window must ignore it; the altitude stays at the 1000.0 baseline.
+        for (t in 0L..9_000L step 1_000L) {
+            barometer.onPressure(t, if (t == 5_000L) 992.0 else 1000.0)
+        }
+        assertThat(barometer.currentBarometricAltitudeM)
+            .isWithin(1.0)
+            .of(Barometer.altitudeFrom(1000.0, 1013.25))
+    }
+
+    @Test
+    fun `spike leaves the median window once medianWindowSize samples have passed`() {
+        val barometer = Barometer()
+        barometer.start(0)
+        // Fill the window with 1000.0, then switch to a genuine 990.0 (≈85 m up).
+        for (t in 0L..9_000L step 1_000L) barometer.onPressure(t, 1000.0)
+        barometer.onPressure(10_000L, 990.0)
+        // One 990.0 among nine 1000.0: the median is still the old baseline.
+        assertThat(barometer.currentBarometricAltitudeM)
+            .isWithin(1.0)
+            .of(Barometer.altitudeFrom(1000.0, 1013.25))
+        // After a full window of 990.0 the median has moved to the new value.
+        for (t in 11_000L..20_000L step 1_000L) barometer.onPressure(t, 990.0)
+        assertThat(barometer.currentBarometricAltitudeM)
+            .isWithin(1.0)
+            .of(Barometer.altitudeFrom(990.0, 1013.25))
+    }
+
+    @Test
     fun `drift correction is clamped in both directions`() {
         val barometer = calibrateAround100Metres()
         val before = barometer.seaLevelHpa
