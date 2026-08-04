@@ -2,6 +2,7 @@ package dev.iskyd.dok2.ui
 
 import android.content.Context
 import android.content.Intent
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,11 +18,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -38,7 +41,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import dev.iskyd.dok2.data.repo.TrackRepository
@@ -72,6 +80,23 @@ fun LibraryScreen(trackRepository: TrackRepository) {
     LaunchedEffect(refreshKey, trackRepository) { openTrack = trackRepository.getOpenTrack() }
 
     Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Library", style = MaterialTheme.typography.headlineSmall)
+            if (summaries.isNotEmpty()) {
+                val trackCount = summaries.size
+                Text(
+                    text = if (trackCount == 1) "1 track" else "$trackCount tracks",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        HorizontalDivider()
+
         // The banner is crash/reboot recovery only: while the service is recording, the open track
         // is live and must not be offered for finalisation.
         if (recordingState == RecordingState.Idle) {
@@ -91,18 +116,22 @@ fun LibraryScreen(trackRepository: TrackRepository) {
                 )
             }
         }
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(summaries, key = { it.id }) { summary ->
-                // The track being recorded into must not be deletable.
-                TrackCard(
-                    summary = summary,
-                    canDelete = summary.id != liveTrackId,
-                    onDelete = { trackToDelete = summary },
-                )
+        if (summaries.isEmpty()) {
+            EmptyLibraryState()
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(summaries, key = { it.id }) { summary ->
+                    // The track being recorded into must not be deletable.
+                    TrackCard(
+                        summary = summary,
+                        canDelete = summary.id != liveTrackId,
+                        onDelete = { trackToDelete = summary },
+                    )
+                }
             }
         }
     }
@@ -134,6 +163,55 @@ fun LibraryScreen(trackRepository: TrackRepository) {
             },
             dismissButton = { TextButton(onClick = { trackToDelete = null }) { Text("Cancel") } },
         )
+    }
+}
+
+@Composable
+private fun EmptyLibraryState() {
+    val glyphColor = MaterialTheme.colorScheme.onSurfaceVariant
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.padding(horizontal = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                modifier =
+                    Modifier.size(96.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) {
+                Canvas(Modifier.size(48.dp)) {
+                    val path =
+                        Path().apply {
+                            moveTo(size.width * 0.10f, size.height * 0.84f)
+                            lineTo(size.width * 0.36f, size.height * 0.30f)
+                            lineTo(size.width * 0.54f, size.height * 0.56f)
+                            lineTo(size.width * 0.72f, size.height * 0.20f)
+                            lineTo(size.width * 0.92f, size.height * 0.84f)
+                        }
+                    drawPath(
+                        path = path,
+                        color = glyphColor,
+                        style =
+                            Stroke(
+                                width = 4.dp.toPx(),
+                                cap = StrokeCap.Round,
+                                join = StrokeJoin.Round,
+                            ),
+                    )
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Text("No tracks yet", style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Finished tracks appear here. Open the Live tab and press Record to start your first track.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
