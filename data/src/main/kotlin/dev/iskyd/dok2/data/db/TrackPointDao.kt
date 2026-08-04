@@ -34,6 +34,19 @@ interface TrackPointDao {
     @Query("UPDATE trackpoints SET alt_dem_m = :altDemM WHERE track_id = :trackId AND seq = :seq")
     suspend fun updateAltDem(trackId: Long, seq: Long, altDemM: Double?)
 
+    /**
+     * The lowest and highest altitude of a track from both sources. DEM altitude is the display
+     * source of truth per DOCUMENTATION.md §Elevation; raw GNSS is kept as the fallback. MIN/MAX
+     * ignore NULLs, so both columns of a pair are non-null iff the track has at least one point
+     * with that altitude.
+     */
+    @Query(
+        "SELECT MIN(alt_dem_m) AS minDemM, MAX(alt_dem_m) AS maxDemM, " +
+            "MIN(alt_gnss_m) AS minGnssM, MAX(alt_gnss_m) AS maxGnssM " +
+            "FROM trackpoints WHERE track_id = :trackId"
+    )
+    suspend fun getAltitudeExtremes(trackId: Long): AltitudeExtremesRow
+
     /** Deletes every point of a track. */
     @Query("DELETE FROM trackpoints WHERE track_id = :trackId")
     suspend fun deleteByTrack(trackId: Long)

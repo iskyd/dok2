@@ -77,6 +77,7 @@ fun LibraryScreen(trackRepository: TrackRepository) {
     var refreshKey by remember { mutableIntStateOf(0) }
     var trackToDelete by remember { mutableStateOf<TrackSummary?>(null) }
     var trackToEdit by remember { mutableStateOf<Track?>(null) }
+    var trackForDetails by remember { mutableStateOf<Track?>(null) }
 
     LaunchedEffect(refreshKey, trackRepository) { openTrack = trackRepository.getOpenTrack() }
 
@@ -134,6 +135,9 @@ fun LibraryScreen(trackRepository: TrackRepository) {
                             scope.launch { trackToEdit = trackRepository.getTrack(summary.id) }
                         },
                         onDelete = { trackToDelete = summary },
+                        onOpen = {
+                            scope.launch { trackForDetails = trackRepository.getTrack(summary.id) }
+                        },
                     )
                 }
             }
@@ -183,6 +187,14 @@ fun LibraryScreen(trackRepository: TrackRepository) {
                 }
             },
             onDismiss = { trackToEdit = null },
+        )
+    }
+
+    trackForDetails?.let { track ->
+        TrackDetailDialog(
+            track = track,
+            trackRepository = trackRepository,
+            onDismiss = { trackForDetails = null },
         )
     }
 }
@@ -266,8 +278,9 @@ private fun TrackCard(
     canDelete: Boolean,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onOpen: () -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth()) {
+    Card(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier =

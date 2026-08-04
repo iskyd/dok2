@@ -11,6 +11,7 @@ import dev.iskyd.dok2.data.db.TrackPointDao
 import dev.iskyd.dok2.data.db.TrackPointEntity
 import dev.iskyd.dok2.data.db.TrackSummaryRow
 import dev.iskyd.dok2.data.db.WaypointDao
+import dev.iskyd.dok2.domain.model.ElevationExtremes
 import dev.iskyd.dok2.domain.model.PointState
 import dev.iskyd.dok2.domain.model.Track
 import dev.iskyd.dok2.domain.model.TrackPoint
@@ -160,6 +161,20 @@ class TrackRepository(
 
     /** Loads a full track by id, or null when it does not exist. */
     suspend fun getTrack(trackId: Long): Track? = trackDao.getById(trackId)?.toDomain()
+
+    /**
+     * Lowest and highest altitude of a track, preferring the DEM-derived altitude (EGM2008 mean sea
+     * level); falls back to raw GNSS (WGS84 ellipsoid) when no DEM altitude was computed. Both
+     * values are null when the track has no points with an altitude.
+     */
+    suspend fun getElevationExtremes(trackId: Long): ElevationExtremes {
+        val row = trackPointDao.getAltitudeExtremes(trackId)
+        return if (row.minDemM != null) {
+            ElevationExtremes(minM = row.minDemM, maxM = row.maxDemM)
+        } else {
+            ElevationExtremes(minM = row.minGnssM, maxM = row.maxGnssM)
+        }
+    }
 
     /**
      * The single track that was never finalised, if any. On launch the UI prompts to resume or
