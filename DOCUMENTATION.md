@@ -187,7 +187,7 @@ GNSS vertical error is 2–3× horizontal. Naively summing GNSS altitude deltas 
 
 ### Live — barometer
 
-`Sensor.TYPE_PRESSURE` at 1 Hz. Costs under a milliwatt.
+`Sensor.TYPE_PRESSURE` at ~5 Hz (SENSOR_DELAY_UI). Costs under a milliwatt.
 
 ```
 altitude = 44330 × (1 − (p / p₀)^(1/5.255))
@@ -203,6 +203,8 @@ p₀ += clamp(error × K_DRIFT, −0.5, +0.5)     // ≈30 min time constant
 ```
 
 The clamp is what makes this safe: one bad GNSS altitude cannot yank the baseline, but a genuine weather front is tracked over half an hour.
+
+**Smoothing.** Instantaneous barometer samples are noisy: a footstep, a gust of wind across the sensor port, or the phone bouncing in a pocket produces pressure spikes of 1–2 hPa (≈8–16 m) that last a fraction of a second. The altitude is computed from the median of the last 10 samples (~2 s at the 5 Hz rate), never from a single sample. A spike occupies at most a few window slots and cannot move the median; the raw samples are still what gets stored in `trackpoints.pressure_hpa`. Without this, spikes regularly exceed the 5 m hysteresis below and the accumulator records hundreds of metres of phantom gain on a flat walk.
 
 **Hysteresis.** Gain and loss accumulate only after a sustained 5 m move in one direction:
 
@@ -481,7 +483,7 @@ Xiaomi/MIUI, Huawei/EMUI, Samsung, OnePlus and others kill foreground services r
 ### Sensor quirks
 
 - Some devices report a **constant or fabricated accuracy value**. The debug screen shows the raw accuracy distribution; check it on any new device.
-- The **barometer responds to wind and to being sealed in a zipped pocket.** Taking the phone out produces a pressure step. The 5 m hysteresis absorbs most of this, the drift clamp the rest.
+- The **barometer responds to wind and to being sealed in a zipped pocket.** Taking the phone out produces a pressure step. The 10-sample median window absorbs the instantaneous spikes, the 5 m hysteresis the slower steps, the drift clamp the weather.
 - **Cold fix without A-GPS** is 20–45 s. Show satellite count; never block recording on the first fix.
 
 ---
@@ -493,6 +495,7 @@ Xiaomi/MIUI, Huawei/EMUI, Samsung, OnePlus and others kill foreground services r
 | **Anchor** | The last trackpoint that advanced the odometer. New fixes are compared against it, not against the previous fix |
 | **Accepted / Stationary / Rejected** | The three verdicts of `FilterChain`. Rejected points are discarded; Stationary points are stored but do not accumulate distance |
 | **Hysteresis** | The 5 m threshold before an elevation change is counted, preventing noise-driven phantom gain |
+| **Median window** | The last 10 pressure samples whose median replaces the raw sample in altitude computations, killing instantaneous spikes |
 | **Trickle** | The 30 s GNSS interval used after 2 minutes of manual pause, keeping ephemeris fresh for a warm resume |
 | **PMTiles** | Single-file vector tile archive format; one file per map region |
 | **HGT** | Raw SRTM elevation grid; one big-endian int16 file per 1° cell |
