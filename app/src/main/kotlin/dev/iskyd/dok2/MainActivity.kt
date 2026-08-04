@@ -141,7 +141,7 @@ private fun MainScaffold(app: Dok2Application) {
         Box(Modifier.fillMaxSize().padding(paddingValues)) {
             when (screen) {
                 AppScreen.LIBRARY -> LibraryScreen(trackRepository = app.trackRepository)
-                AppScreen.LIVE -> LiveScreen()
+                AppScreen.LIVE -> LiveScreen(trackRepository = app.trackRepository)
                 AppScreen.MAP -> MapScreen(trackRepository = app.trackRepository)
                 AppScreen.SETTINGS -> SettingsScreen(settingsRepository = app.settingsRepository)
             }

@@ -114,14 +114,16 @@ class TrackRepository(
         )
     }
 
-    /** Renames a track; a no-op when the track does not exist. */
-    suspend fun setTrackName(trackId: Long, name: String) {
+    /** Renames a track, or clears its name when null; a no-op when the track does not exist. */
+    suspend fun setTrackName(trackId: Long, name: String?) {
         val entity = trackDao.getById(trackId) ?: return
         trackDao.update(entity.copy(name = name))
     }
 
-    /** Replaces a track's notes; a no-op when the track does not exist. */
-    suspend fun setTrackNotes(trackId: Long, notes: String) {
+    /**
+     * Replaces a track's notes, or clears them when null; a no-op when the track does not exist.
+     */
+    suspend fun setTrackNotes(trackId: Long, notes: String?) {
         val entity = trackDao.getById(trackId) ?: return
         trackDao.update(entity.copy(notes = notes))
     }

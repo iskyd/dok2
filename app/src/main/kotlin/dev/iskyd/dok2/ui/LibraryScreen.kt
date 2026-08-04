@@ -76,6 +76,7 @@ fun LibraryScreen(trackRepository: TrackRepository) {
     var openTrack by remember { mutableStateOf<Track?>(null) }
     var refreshKey by remember { mutableIntStateOf(0) }
     var trackToDelete by remember { mutableStateOf<TrackSummary?>(null) }
+    var trackToEdit by remember { mutableStateOf<Track?>(null) }
 
     LaunchedEffect(refreshKey, trackRepository) { openTrack = trackRepository.getOpenTrack() }
 
@@ -125,10 +126,13 @@ fun LibraryScreen(trackRepository: TrackRepository) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(summaries, key = { it.id }) { summary ->
-                    // The track being recorded into must not be deletable.
+                    // The track being recorded into must not be deletable, but it stays editable.
                     TrackCard(
                         summary = summary,
                         canDelete = summary.id != liveTrackId,
+                        onEdit = {
+                            scope.launch { trackToEdit = trackRepository.getTrack(summary.id) }
+                        },
                         onDelete = { trackToDelete = summary },
                     )
                 }
@@ -162,6 +166,23 @@ fun LibraryScreen(trackRepository: TrackRepository) {
                 }
             },
             dismissButton = { TextButton(onClick = { trackToDelete = null }) { Text("Cancel") } },
+        )
+    }
+
+    trackToEdit?.let { track ->
+        TrackDetailsDialog(
+            title = "Edit track",
+            confirmLabel = "Save",
+            initialName = track.name ?: formatDate(track.startedAtMs),
+            initialNotes = track.notes ?: "",
+            onConfirm = { name, notes ->
+                trackToEdit = null
+                scope.launch {
+                    trackRepository.setTrackName(track.id, name.ifEmpty { null })
+                    trackRepository.setTrackNotes(track.id, notes.ifEmpty { null })
+                }
+            },
+            onDismiss = { trackToEdit = null },
         )
     }
 }
@@ -240,7 +261,12 @@ private fun OpenTrackBanner(track: Track, onResume: () -> Unit, onFinalise: () -
 }
 
 @Composable
-private fun TrackCard(summary: TrackSummary, canDelete: Boolean, onDelete: () -> Unit) {
+private fun TrackCard(
+    summary: TrackSummary,
+    canDelete: Boolean,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
     Card(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -280,9 +306,12 @@ private fun TrackCard(summary: TrackSummary, canDelete: Boolean, onDelete: () ->
                 }
             }
             Spacer(Modifier.width(4.dp))
-            if (canDelete) {
-                TextButton(onClick = onDelete) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+            Column(horizontalAlignment = Alignment.End) {
+                TextButton(onClick = onEdit) { Text("Edit") }
+                if (canDelete) {
+                    TextButton(onClick = onDelete) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
         }

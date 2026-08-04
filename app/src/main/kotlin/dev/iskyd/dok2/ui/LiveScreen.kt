@@ -9,18 +9,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,19 +27,24 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import dev.iskyd.dok2.data.repo.TrackRepository
 import dev.iskyd.dok2.domain.model.RecordingState
 import dev.iskyd.dok2.recording.RecordingService
 import dev.iskyd.dok2.recording.RecordingStateHolder
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * The recording screen. It observes [RecordingStateHolder] and never writes recording state; the
  * buttons only send intent actions to [RecordingService], which owns the state machine.
  */
 @Composable
-fun LiveScreen() {
+fun LiveScreen(trackRepository: TrackRepository) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val state by RecordingStateHolder.state.collectAsState()
     val distanceM by RecordingStateHolder.distanceM.collectAsState()
     val altitudeM by RecordingStateHolder.currentAltitudeM.collectAsState()
@@ -49,7 +53,8 @@ fun LiveScreen() {
     val barometerCalibrated by RecordingStateHolder.barometerCalibrated.collectAsState()
     val movingTimeMs by RecordingStateHolder.movingTimeMs.collectAsState()
     val movingSegmentStartMs by RecordingStateHolder.movingTimeSegmentStartMs.collectAsState()
-    var confirmStop by remember { mutableStateOf(false) }
+    val liveTrackId by RecordingStateHolder.openTrackId.collectAsState()
+    var saveDialog by remember { mutableStateOf(false) }
 
     val elapsedMs =
         produceState(0L, state, movingTimeMs, movingSegmentStartMs) {
@@ -152,7 +157,7 @@ fun LiveScreen() {
                     }
             }
             if (state != RecordingState.Idle) {
-                OutlinedButton(onClick = { confirmStop = true }) { Text("Stop") }
+                OutlinedButton(onClick = { saveDialog = true }) { Text("Stop") }
             }
         }
         Spacer(Modifier.height(24.dp))
@@ -165,22 +170,25 @@ fun LiveScreen() {
         )
     }
 
-    if (confirmStop) {
-        AlertDialog(
-            onDismissRequest = { confirmStop = false },
-            title = { Text("Stop recording?") },
-            text = { Text("The track will be finalised and the recording stopped.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmStop = false
-                        sendAction(context, RecordingService.ACTION_STOP)
+    if (saveDialog) {
+        TrackDetailsDialog(
+            title = "Save track",
+            confirmLabel = "Save & Stop",
+            initialName = formatDate(System.currentTimeMillis()),
+            initialNotes = "",
+            onConfirm = { name, notes ->
+                saveDialog = false
+                scope.launch {
+                    // Persist the name/description to the open track before ACTION_STOP is sent so
+                    // finalisation reads the already-updated row.
+                    liveTrackId?.let { id ->
+                        trackRepository.setTrackName(id, name.ifEmpty { null })
+                        trackRepository.setTrackNotes(id, notes.ifEmpty { null })
                     }
-                ) {
-                    Text("Stop")
+                    sendAction(context, RecordingService.ACTION_STOP)
                 }
             },
-            dismissButton = { TextButton(onClick = { confirmStop = false }) { Text("Cancel") } },
+            onDismiss = { saveDialog = false },
         )
     }
 }
@@ -213,3 +221,6 @@ private fun formatDuration(elapsedTimeS: Long): String {
     val seconds = elapsedTimeS % 60
     return String.format(Locale.ROOT, "%d:%02d:%02d", hours, minutes, seconds)
 }
+
+private fun formatDate(tMs: Long): String =
+    SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(tMs))
