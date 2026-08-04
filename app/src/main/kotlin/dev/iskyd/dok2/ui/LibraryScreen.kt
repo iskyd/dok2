@@ -281,46 +281,52 @@ private fun TrackCard(
     onOpen: () -> Unit,
 ) {
     Card(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier =
-                    Modifier.size(56.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("—", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = summary.name ?: formatDate(summary.startedAtMs),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Text(
-                    text = formatDate(summary.startedAtMs),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = formatDistance(summary.distanceM),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Text(
-                    text = formatDuration(summary.elapsedTimeS),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                summary.gainDemM?.let {
+        Column {
+            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier =
+                        Modifier.size(56.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("—", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
                     Text(
-                        text = "▲ ${formatDistance(it)}",
+                        text = summary.name ?: formatDate(summary.startedAtMs),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = formatDate(summary.startedAtMs),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = formatDistance(summary.distanceM),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = formatDuration(summary.elapsedTimeS),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    summary.gainDemM?.let {
+                        Text(
+                            text = "▲ ${formatDistance(it)}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
             }
-            Spacer(Modifier.width(4.dp))
-            Column(horizontalAlignment = Alignment.End) {
+            HorizontalDivider(Modifier.padding(horizontal = 12.dp))
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 TextButton(onClick = onEdit) { Text("Edit") }
+                Spacer(Modifier.weight(1f))
                 if (canDelete) {
                     TextButton(onClick = onDelete) {
                         Text("Delete", color = MaterialTheme.colorScheme.error)
