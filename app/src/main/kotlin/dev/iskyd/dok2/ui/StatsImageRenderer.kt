@@ -102,7 +102,7 @@ object StatsImageRenderer {
         val boxLeft = MARGIN
         val boxTop = 300f
         val boxRight = WIDTH - MARGIN
-        val boxBottom = HEIGHT - 160f
+        val boxBottom = HEIGHT - 260f
         val boxWidth = boxRight - boxLeft
         val boxHeight = boxBottom - boxTop
 
@@ -139,14 +139,14 @@ object StatsImageRenderer {
     }
 
     private fun drawLogo(canvas: Canvas) {
-        val wordPaint = textPaint(64f, Typeface.DEFAULT_BOLD)
+        val wordPaint = textPaint(52f, Typeface.DEFAULT_BOLD)
         val wordRight = WIDTH - MARGIN
         val baseline = HEIGHT - MARGIN
         val wordWidth = wordPaint.measureText("dok2")
         val wordLeft = wordRight - wordWidth
         canvas.drawText("dok2", wordLeft, baseline, wordPaint)
 
-        val glyphScale = 96f / 108f
+        val glyphScale = 140f / 108f
         val glyphPath =
             Path().apply {
                 moveTo(30f * glyphScale, 72f * glyphScale)
@@ -155,9 +155,9 @@ object StatsImageRenderer {
                 lineTo(66f * glyphScale, 34f * glyphScale)
                 lineTo(78f * glyphScale, 44f * glyphScale)
             }
-        // Place the 96 px glyph box left of the word with a 24 px gap, and drop the glyph so its
+        // Place the 140 px glyph box left of the word with a 24 px gap, and drop the glyph so its
         // bottom (72f*s in viewport space) sits on the word's baseline.
-        val glyphBoxLeft = wordLeft - 24f - 96f
+        val glyphBoxLeft = wordLeft - 24f - 140f
         glyphPath.offset(glyphBoxLeft, baseline - 72f * glyphScale)
 
         canvas.drawPath(glyphPath, strokePaint(8f * glyphScale, OUTLINE_COLOR))
