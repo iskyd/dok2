@@ -50,6 +50,15 @@ object RecordingStateHolder {
      */
     val barometerCalibrated: StateFlow<Boolean> = _barometerCalibrated
 
+    private val _calibrationReady = MutableStateFlow(false)
+
+    /**
+     * True while in the [RecordingState.Calibrating] phase once the barometer baseline is solved or
+     * the calibration window elapsed, meaning the "Start recording" action is available. False in
+     * every other state.
+     */
+    val calibrationReady: StateFlow<Boolean> = _calibrationReady
+
     private val _elevationGainM = MutableStateFlow<Double?>(null)
 
     /**
@@ -117,6 +126,10 @@ object RecordingStateHolder {
         _barometerCalibrated.value = calibrated
     }
 
+    internal fun setCalibrationReady(ready: Boolean) {
+        _calibrationReady.value = ready
+    }
+
     internal fun setElevationGainM(gainM: Double?) {
         _elevationGainM.value = gainM
     }
@@ -137,6 +150,7 @@ object RecordingStateHolder {
         _distanceM.value = 0.0
         _currentAltitudeM.value = null
         _barometerCalibrated.value = false
+        _calibrationReady.value = false
         _elevationGainM.value = null
         _elevationLossM.value = null
         _lastLatLng.value = null

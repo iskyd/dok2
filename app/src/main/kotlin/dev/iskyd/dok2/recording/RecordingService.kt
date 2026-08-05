@@ -93,6 +93,15 @@ class RecordingService : Service() {
      */
     private var wasBarometerCalibrated = false
 
+    /** True once the calibration phase finished; gates the "Start recording" action. */
+    private var calibrationReady = false
+
+    /** Ends the calibration phase at the window timeout even without a solved baseline. */
+    private val calibrationTimeoutRunnable = Runnable {
+        Log.d(TAG, "calibration window elapsed; ready to start recording")
+        finishCalibration()
+    }
+
     /** The most recent fix, used for the Waypoint action. */
     private var lastFix: GpsFix? = null
 
@@ -119,6 +128,7 @@ class RecordingService : Service() {
         startForegroundServiceCompat()
         when (intent?.action) {
             ACTION_START -> startRecording()
+            ACTION_BEGIN_RECORDING -> beginRecordingAfterCalibration()
             ACTION_PAUSE_RESUME -> togglePauseResume()
             ACTION_WAYPOINT -> saveWaypoint()
             ACTION_STOP -> stopRecording()
@@ -140,8 +150,10 @@ class RecordingService : Service() {
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * Starts recording, resuming into an existing open track (after a reboot or watchdog restart)
-     * or creating a new one. [TrackRepository.startTrack] is only called when no open track exists.
+     * Starts recording: resuming into an existing open track (reboot, watchdog restart, library
+     * resume) or creating a new one. On barometer devices a fresh recording enters the calibration
+     * phase first (see [beginCalibrationSession]); recording proper begins on
+     * ACTION_BEGIN_RECORDING.
      */
     private fun startRecording() {
         val currentTrackId = trackId
@@ -153,10 +165,23 @@ class RecordingService : Service() {
             try {
                 val now = System.currentTimeMillis()
                 val openTrack = trackRepository.getOpenTrack()
-                val id = openTrack?.id ?: trackRepository.startTrack(now, name = null)
-                trackId = id
-                RecordingStateHolder.setOpenTrackId(id)
-                beginRecordingSession(id, now)
+                if (openTrack != null) {
+                    // Resuming an open track: recording starts immediately — the calibration gate
+                    // only applies to fresh starts, and after a reboot there is no UI alive to
+                    // press the start button.
+                    trackId = openTrack.id
+                    RecordingStateHolder.setOpenTrackId(openTrack.id)
+                    beginRecordingSession(openTrack.id, now, fromCalibration = false)
+                } else {
+                    val id = trackRepository.startTrack(now, name = null)
+                    trackId = id
+                    RecordingStateHolder.setOpenTrackId(id)
+                    if (pressureSensor != null) {
+                        beginCalibrationSession(now)
+                    } else {
+                        beginRecordingSession(id, now, fromCalibration = false)
+                    }
+                }
             } catch (error: Exception) {
                 Log.e(TAG, "failed to start recording", error)
                 stopSelf()
@@ -164,8 +189,74 @@ class RecordingService : Service() {
         }
     }
 
-    private fun beginRecordingSession(id: Long, now: Long) {
-        stateMachine.start(now)
+    /**
+     * Begins the recording proper into [id]. When [fromCalibration] the barometer baseline solved
+     * in the calibration phase is preserved; otherwise every pipeline is reset and the barometer
+     * calibrates in the background during recording, as before the calibration phase existed.
+     */
+    private fun beginRecordingSession(id: Long, now: Long, fromCalibration: Boolean) {
+        if (!fromCalibration) {
+            resetPipelines()
+        }
+        handler.removeCallbacks(calibrationTimeoutRunnable)
+        if (fromCalibration) {
+            stateMachine.beginRecording(now)
+        } else {
+            stateMachine.start(now)
+        }
+        RecordingStateHolder.setCalibrationReady(false)
+        scheduleWatchdog(this)
+        registerPressureSensor()
+        requestLocationUpdates(requestedIntervalMs)
+        updateNotification()
+        Log.d(TAG, "recording started into track $id")
+    }
+
+    /**
+     * Runs the calibration phase: sensors and GNSS feed the barometer so it can solve its baseline,
+     * but no trackpoints are recorded and the timer does not run. Ends early when the baseline is
+     * solved or at the window timeout (see [finishCalibration]); recording proper begins on
+     * ACTION_BEGIN_RECORDING, or never — cancel tears down and deletes the empty track.
+     */
+    private fun beginCalibrationSession(now: Long) {
+        resetPipelines()
+        stateMachine.startCalibration(now)
+        calibrationReady = false
+        RecordingStateHolder.setCalibrationReady(false)
+        barometer.start(now)
+        scheduleWatchdog(this)
+        registerPressureSensor()
+        requestLocationUpdates(requestedIntervalMs)
+        handler.removeCallbacks(calibrationTimeoutRunnable)
+        handler.postDelayed(calibrationTimeoutRunnable, CALIBRATION_TIMEOUT_MS)
+        updateNotification()
+        Log.d(TAG, "calibration phase started")
+    }
+
+    /**
+     * ACTION_BEGIN_RECORDING handler: starts recording once the calibration phase is over. Ignored
+     * unless calibrating and [calibrationReady] — the user decision was to wait for calibration (or
+     * its timeout) before starting.
+     */
+    private fun beginRecordingAfterCalibration() {
+        val id = trackId ?: return
+        if (stateMachine.state != RecordingState.Calibrating) return
+        if (!calibrationReady) {
+            Log.d(TAG, "begin recording requested before calibration ready; ignoring")
+            return
+        }
+        beginRecordingSession(id, System.currentTimeMillis(), fromCalibration = true)
+    }
+
+    private fun finishCalibration() {
+        if (calibrationReady) return
+        calibrationReady = true
+        handler.removeCallbacks(calibrationTimeoutRunnable)
+        RecordingStateHolder.setCalibrationReady(true)
+        updateNotification()
+    }
+
+    private fun resetPipelines() {
         filterChain.reset()
         barometer.reset()
         elevationStats.reset()
@@ -178,11 +269,6 @@ class RecordingService : Service() {
         RecordingStateHolder.setCurrentAltitude(null)
         RecordingStateHolder.setLastLatLng(null)
         RecordingStateHolder.setLastFixMs(null)
-        scheduleWatchdog(this)
-        registerPressureSensor()
-        requestLocationUpdates(requestedIntervalMs)
-        updateNotification()
-        Log.d(TAG, "recording started into track $id")
     }
 
     private fun togglePauseResume() {
@@ -192,6 +278,7 @@ class RecordingService : Service() {
             RecordingState.ManualPaused -> stateMachine.userResume(now)
             RecordingState.Recording,
             RecordingState.AutoPaused -> stateMachine.userPause(now)
+            RecordingState.Calibrating,
             RecordingState.Idle -> return
         }
         refreshLocationUpdateInterval()
@@ -230,6 +317,13 @@ class RecordingService : Service() {
         serviceScope.launch {
             try {
                 val now = System.currentTimeMillis()
+                if (stateMachine.state == RecordingState.Calibrating) {
+                    // Cancelled during calibration: the track has no points yet, delete it whole.
+                    stateMachine.stop(now)
+                    trackRepository.deleteTrack(id)
+                    teardownRecording()
+                    return@launch
+                }
                 stateMachine.stop(now)
                 val remaining = pointBuffer.toList()
                 pointBuffer.clear()
@@ -248,7 +342,6 @@ class RecordingService : Service() {
     // ---------------------------------------------------------------------------------------------
 
     private fun handleFix(location: Location) {
-        val id = trackId ?: return
         val fix =
             GpsFix(
                 tMs = location.time,
@@ -267,6 +360,20 @@ class RecordingService : Service() {
             barometer.onGnssAltitude(fix.tMs, altGnssM, fix.accuracyM)
         }
 
+        if (stateMachine.state == RecordingState.Calibrating) {
+            // Calibration phase: fixes feed the barometer baseline only; nothing is recorded or
+            // accumulated. The UI still gets the live fallback altitude.
+            RecordingStateHolder.setLastFixMs(fix.tMs)
+            RecordingStateHolder.setCurrentAltitude(barometer.currentBarometricAltitudeM)
+            RecordingStateHolder.setBarometerCalibrated(barometer.calibrated)
+            RecordingStateHolder.setLastLatLng(LatLng(fix.latDeg, fix.lonDeg))
+            if (barometer.calibrated) {
+                finishCalibration()
+            }
+            return
+        }
+
+        val id = trackId ?: return
         val result = filterChain.onFix(fix, stateMachine.state.pointState ?: PointState.RECORDING)
         when (result) {
             is FilterResult.Accepted -> {
@@ -397,6 +504,8 @@ class RecordingService : Service() {
 
     private fun teardownRecording() {
         cancelWatchdog(this)
+        handler.removeCallbacks(calibrationTimeoutRunnable)
+        calibrationReady = false
         sensorManager.unregisterListener(pressureListener)
         locationManager.removeUpdates(locationListener)
         pointBuffer.clear()
@@ -461,7 +570,8 @@ class RecordingService : Service() {
 
     /**
      * Persists every state-machine transition to `pause_events` and mirrors it to
-     * [RecordingStateHolder]. The Idle transition (stop) is skipped — finalisation handles stop.
+     * [RecordingStateHolder]. Transitions whose new state has no [PointState] code — Idle (stop is
+     * handled by finalisation) and Calibrating (no points exist during calibration) — are skipped.
      */
     private fun onStateTransition(event: PauseEvent) {
         val id = trackId
@@ -506,21 +616,16 @@ class RecordingService : Service() {
     }
 
     private fun buildNotification(): Notification {
+        val calibrating = stateMachine.state == RecordingState.Calibrating
         val contentText =
-            if (System.currentTimeMillis() < waypointFlashUntilMs) {
-                "Waypoint saved"
-            } else {
-                when (stateMachine.state) {
-                    RecordingState.Recording -> "Recording"
-                    RecordingState.AutoPaused -> "Auto-paused"
-                    RecordingState.ManualPaused -> "Paused"
-                    RecordingState.Idle -> "Idle"
-                }
-            }
-        val pauseLabel =
-            when (stateMachine.state) {
-                RecordingState.ManualPaused -> "Resume"
-                else -> "Pause"
+            when {
+                System.currentTimeMillis() < waypointFlashUntilMs -> "Waypoint saved"
+                calibrating && !calibrationReady -> "Calibrating altitude…"
+                calibrating -> "Calibration complete — start recording"
+                stateMachine.state == RecordingState.Recording -> "Recording"
+                stateMachine.state == RecordingState.AutoPaused -> "Auto-paused"
+                stateMachine.state == RecordingState.ManualPaused -> "Paused"
+                else -> "Idle"
             }
         val contentIntent =
             PendingIntent.getActivity(
@@ -529,17 +634,27 @@ class RecordingService : Service() {
                 Intent(this, MainActivity::class.java),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
-        return NotificationCompat.Builder(this, RecordingNotifications.CHANNEL_RECORDING)
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setContentTitle(getString(R.string.app_name))
-            .setContentText(contentText)
-            .setContentIntent(contentIntent)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .addAction(0, pauseLabel, servicePendingIntent(ACTION_PAUSE_RESUME))
-            .addAction(0, "Waypoint", servicePendingIntent(ACTION_WAYPOINT))
-            .addAction(0, "Stop", servicePendingIntent(ACTION_STOP))
-            .build()
+        val builder =
+            NotificationCompat.Builder(this, RecordingNotifications.CHANNEL_RECORDING)
+                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                .setContentTitle(getString(R.string.app_name))
+                .setContentText(contentText)
+                .setContentIntent(contentIntent)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+        if (calibrating) {
+            builder.addAction(0, "Start recording", servicePendingIntent(ACTION_BEGIN_RECORDING))
+            builder.addAction(0, "Cancel", servicePendingIntent(ACTION_STOP))
+        } else {
+            builder.addAction(
+                0,
+                if (stateMachine.state == RecordingState.ManualPaused) "Resume" else "Pause",
+                servicePendingIntent(ACTION_PAUSE_RESUME),
+            )
+            builder.addAction(0, "Waypoint", servicePendingIntent(ACTION_WAYPOINT))
+            builder.addAction(0, "Stop", servicePendingIntent(ACTION_STOP))
+        }
+        return builder.build()
     }
 
     private fun servicePendingIntent(action: String): PendingIntent =
@@ -558,6 +673,7 @@ class RecordingService : Service() {
 
     companion object {
         const val ACTION_START = "dev.iskyd.dok2.recording.action.START"
+        const val ACTION_BEGIN_RECORDING = "dev.iskyd.dok2.recording.action.BEGIN_RECORDING"
         const val ACTION_PAUSE_RESUME = "dev.iskyd.dok2.recording.action.PAUSE_RESUME"
         const val ACTION_WAYPOINT = "dev.iskyd.dok2.recording.action.WAYPOINT"
         const val ACTION_STOP = "dev.iskyd.dok2.recording.action.STOP"
@@ -565,5 +681,8 @@ class RecordingService : Service() {
         private const val TAG = "RecordingService"
         private const val POINT_BUFFER_SIZE = 10
         private const val WAYPOINT_FLASH_MS = 3_000L
+
+        /** Matches [Barometer.Config.calibrationWindowMs]; the phase lasts at most one minute. */
+        private const val CALIBRATION_TIMEOUT_MS = 60_000L
     }
 }

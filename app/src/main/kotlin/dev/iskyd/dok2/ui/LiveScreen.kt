@@ -51,6 +51,7 @@ fun LiveScreen(trackRepository: TrackRepository) {
     val elevationGainM by RecordingStateHolder.elevationGainM.collectAsState()
     val elevationLossM by RecordingStateHolder.elevationLossM.collectAsState()
     val barometerCalibrated by RecordingStateHolder.barometerCalibrated.collectAsState()
+    val calibrationReady by RecordingStateHolder.calibrationReady.collectAsState()
     val movingTimeMs by RecordingStateHolder.movingTimeMs.collectAsState()
     val movingSegmentStartMs by RecordingStateHolder.movingTimeSegmentStartMs.collectAsState()
     val liveTrackId by RecordingStateHolder.openTrackId.collectAsState()
@@ -149,6 +150,13 @@ fun LiveScreen(trackRepository: TrackRepository) {
                     ) {
                         Text("Resume")
                     }
+                RecordingState.Calibrating ->
+                    Button(
+                        onClick = { sendAction(context, RecordingService.ACTION_BEGIN_RECORDING) },
+                        enabled = calibrationReady,
+                    ) {
+                        Text("Start recording")
+                    }
                 else ->
                     Button(
                         onClick = { sendAction(context, RecordingService.ACTION_PAUSE_RESUME) }
@@ -156,7 +164,11 @@ fun LiveScreen(trackRepository: TrackRepository) {
                         Text("Pause")
                     }
             }
-            if (state != RecordingState.Idle) {
+            if (state == RecordingState.Calibrating) {
+                OutlinedButton(onClick = { sendAction(context, RecordingService.ACTION_STOP) }) {
+                    Text("Cancel")
+                }
+            } else if (state != RecordingState.Idle) {
                 OutlinedButton(onClick = { saveDialog = true }) { Text("Stop") }
             }
         }
@@ -202,6 +214,7 @@ private fun sendAction(context: Context, action: String) {
 
 private fun stateLabel(state: RecordingState): String =
     when (state) {
+        RecordingState.Calibrating -> "CALIBRATING"
         RecordingState.Recording -> "RECORDING"
         RecordingState.AutoPaused -> "AUTO PAUSED"
         RecordingState.ManualPaused -> "PAUSED"
