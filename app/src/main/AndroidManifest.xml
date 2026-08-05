@@ -8,13 +8,15 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!-- MapLibre's AAR manifest declares INTERNET / ACCESS_NETWORK_STATE /
-         ACCESS_WIFI_STATE / ACCESS_COARSE_LOCATION. The app is fully offline
-         (style has no sources and no remote URLs), so INTERNET / WIFI_STATE /
-         COARSE_LOCATION are stripped here at merge time. ACCESS_NETWORK_STATE is
-         kept: MapLibre's ConnectivityReceiver calls ConnectivityManager from its
-         CONNECTIVITY_CHANGE handler and crashes with SecurityException without
-         it (DOCUMENTATION.md §Permissions). It grants no network access — the
-         app still holds no INTERNET permission. -->
+         ACCESS_WIFI_STATE / ACCESS_COARSE_LOCATION. The app is fully offline:
+         the basemap's only source is a user-supplied LOCAL PMTiles file loaded
+         via pmtiles://file:// — never remote tiles, never a remote style — so
+         INTERNET / WIFI_STATE / COARSE_LOCATION are stripped here at merge
+         time. ACCESS_NETWORK_STATE is kept: MapLibre's ConnectivityReceiver
+         calls ConnectivityManager from its CONNECTIVITY_CHANGE handler and
+         crashes with SecurityException without it (DOCUMENTATION.md
+         §Permissions). It grants no network access — the app still holds no
+         INTERNET permission. -->
     <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />
@@ -31,6 +33,7 @@
     <application
         android:name=".Dok2Application"
         android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.Dok2">
