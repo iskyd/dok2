@@ -192,7 +192,7 @@ GNSS vertical error is 2–3× horizontal. Naively summing GNSS altitude deltas 
 
 ### Live — barometer
 
-`Sensor.TYPE_PRESSURE` at ~5 Hz (SENSOR_DELAY_UI). Costs under a milliwatt.
+`Sensor.TYPE_PRESSURE` at ~5 Hz (SENSOR_DELAY_NORMAL). Costs under a milliwatt. The rate is load-bearing: the 10-sample smoothing window below only spans ~2 s of wall-clock at 5 Hz — registering at SENSOR_DELAY_UI (16.7 Hz) shrinks it to ~0.6 s and walking spikes fill the window, booking phantom gain.
 
 ```
 altitude = 44330 × (1 − (p / p₀)^(1/5.255))

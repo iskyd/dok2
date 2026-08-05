@@ -561,8 +561,15 @@ class RecordingService : Service() {
 
     private fun registerPressureSensor() {
         val sensor = pressureSensor ?: return
+        // 5 Hz (SENSOR_DELAY_NORMAL): Barometer.medianWindowSize (10) is calibrated to this rate so
+        // the median spans ~2 s of wall-clock. SENSOR_DELAY_UI (16.7 Hz) would shrink it to ~0.6 s
+        // and walking spikes would fill the window, booking phantom gain past the 5 m hysteresis.
         val registered =
-            sensorManager.registerListener(pressureListener, sensor, SensorManager.SENSOR_DELAY_UI)
+            sensorManager.registerListener(
+                pressureListener,
+                sensor,
+                SensorManager.SENSOR_DELAY_NORMAL,
+            )
         if (!registered) {
             Log.w(TAG, "pressure sensor registration failed")
         }
