@@ -13,16 +13,18 @@ import kotlin.math.min
 
 /**
  * Renders the "Share image" PNG for a finished track: a 1080x1350 canvas with a transparent
- * background, the recorded route as a polyline, the total distance / elevation gain / duration
- * across the top, and the app glyph + "dok2" at the bottom right. White elements carry a dark
- * outline and a soft shadow so they read on whatever background the transparent PNG is placed on.
- * The caller owns recycling the returned bitmap.
+ * background, the recorded route as a polyline in the brand green, the total distance / elevation
+ * gain / duration across the top, and the app glyph in the brand green above the "dok2" wordmark at
+ * the bottom right. Brand-green elements carry a dark outline, text a soft shadow, so they read on
+ * whatever background the transparent PNG is placed on. The caller owns recycling the returned
+ * bitmap.
  */
 object StatsImageRenderer {
     private const val WIDTH = 1080
     private const val HEIGHT = 1350
     private const val MARGIN = 80f
     private const val FG_COLOR = Color.WHITE
+    private const val LOGO_GREEN = 0xFF1B4D3E.toInt()
     private const val OUTLINE_COLOR = 0xCC000000.toInt()
     private const val TEXT_SHADOW_COLOR = 0x99000000.toInt()
 
@@ -102,7 +104,7 @@ object StatsImageRenderer {
         val boxLeft = MARGIN
         val boxTop = 300f
         val boxRight = WIDTH - MARGIN
-        val boxBottom = HEIGHT - 260f
+        val boxBottom = HEIGHT - 450f
         val boxWidth = boxRight - boxLeft
         val boxHeight = boxBottom - boxTop
 
@@ -120,11 +122,12 @@ object StatsImageRenderer {
         val path = Path()
         for (i in points.indices) {
             val p = points[i]
-            // screenY subtracts so latitude (which grows north) ends up at the top of the box;
-            // the offsets centre the fitted shape when it does not fill one dimension.
+            // screenY subtracts so latitude (which grows north) ends up at the top of the box; the
+            // offsets are subtracted too so the fitted shape centres vertically when it does not
+            // fill the box height.
             val screenX =
                 (boxLeft + (p.lonDeg * cosMid - minLon * cosMid) * scale + offsetX).toFloat()
-            val screenY = (boxBottom - (p.latDeg - minLat) * scale + offsetY).toFloat()
+            val screenY = (boxBottom - (p.latDeg - minLat) * scale - offsetY).toFloat()
             if (i == 0) {
                 path.moveTo(screenX, screenY)
             } else {
@@ -132,21 +135,21 @@ object StatsImageRenderer {
             }
         }
 
-        // Two passes: a thick dark outline underneath the white stroke makes the track read on any
-        // background the transparent PNG is placed on.
+        // Two passes: a thick dark outline underneath the brand-green stroke makes the track read
+        // on any background the transparent PNG is placed on.
         canvas.drawPath(path, strokePaint(36f, OUTLINE_COLOR))
-        canvas.drawPath(path, strokePaint(26f, FG_COLOR))
+        canvas.drawPath(path, strokePaint(26f, LOGO_GREEN))
     }
 
     private fun drawLogo(canvas: Canvas) {
-        val wordPaint = textPaint(52f, Typeface.DEFAULT_BOLD)
+        val wordPaint = textPaint(40f, Typeface.DEFAULT_BOLD)
         val wordRight = WIDTH - MARGIN
         val baseline = HEIGHT - MARGIN
         val wordWidth = wordPaint.measureText("dok2")
         val wordLeft = wordRight - wordWidth
         canvas.drawText("dok2", wordLeft, baseline, wordPaint)
 
-        val glyphScale = 140f / 108f
+        val glyphScale = 200f / 108f
         val glyphPath =
             Path().apply {
                 moveTo(30f * glyphScale, 72f * glyphScale)
@@ -155,13 +158,14 @@ object StatsImageRenderer {
                 lineTo(66f * glyphScale, 34f * glyphScale)
                 lineTo(78f * glyphScale, 44f * glyphScale)
             }
-        // Place the 140 px glyph box left of the word with a 24 px gap, and drop the glyph so its
-        // bottom (72f*s in viewport space) sits on the word's baseline.
-        val glyphBoxLeft = wordLeft - 24f - 140f
-        glyphPath.offset(glyphBoxLeft, baseline - 72f * glyphScale)
+        // The glyph viewport spans x 30..78 and y 34..72, so 54 and 72 are its horizontal centre
+        // and bottom. Centre it on the word and sit its bottom a fixed gap above the word's top.
+        val glyphCenterX = wordLeft + wordWidth / 2f
+        val glyphBottomY = baseline + wordPaint.fontMetrics.ascent - 24f
+        glyphPath.offset(glyphCenterX - 54f * glyphScale, glyphBottomY - 72f * glyphScale)
 
         canvas.drawPath(glyphPath, strokePaint(8f * glyphScale, OUTLINE_COLOR))
-        canvas.drawPath(glyphPath, strokePaint(5.5f * glyphScale, FG_COLOR))
+        canvas.drawPath(glyphPath, strokePaint(5.5f * glyphScale, LOGO_GREEN))
     }
 
     private fun textPaint(size: Float, typeface: Typeface): Paint =
