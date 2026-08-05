@@ -180,6 +180,10 @@ The 3 s interval is restored immediately on resume.
 
 The persistent notification carries **Pause/Resume**, **Waypoint** and **Stop**. During the calibration phase the actions are **Start recording** and **Cancel** instead. The waypoint action matters: marking a spring or a junction must never require unlocking the phone.
 
+### Share image
+
+The track detail dialog offers **Share image**: it renders a 1080×1350 PNG with a transparent background — the recorded route, total distance, elevation gain and duration, and the app glyph + "dok2" bottom right — and opens the share sheet. The PNG is written to the app cache and shared through a FileProvider; no storage permission is involved.
+
 ---
 
 ## Elevation
