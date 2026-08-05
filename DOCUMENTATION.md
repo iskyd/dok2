@@ -353,12 +353,18 @@ The Settings Map data section shows the active region's name and size.
 
 ```xml
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 ```
+
+`ACCESS_COARSE_LOCATION` exists only because Android 12+ (targetSdk 31+) requires an app that requests
+FINE location to also declare COARSE, or the user never gets the coarse-only grant option. FINE
+implies COARSE, so it adds no capability. MapLibre's AAR declares it anyway; the app's manifest
+simply stops stripping it at merge time.
 
 `ACCESS_NETWORK_STATE` is declared despite the offline design. MapLibre's `ConnectivityReceiver`
 registers for `CONNECTIVITY_CHANGE` on every `MapView` creation and calls

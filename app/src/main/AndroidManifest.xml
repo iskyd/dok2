@@ -11,17 +11,22 @@
          ACCESS_WIFI_STATE / ACCESS_COARSE_LOCATION. The app is fully offline:
          the basemap's only source is a user-supplied LOCAL PMTiles file loaded
          via pmtiles://file:// — never remote tiles, never a remote style — so
-         INTERNET / WIFI_STATE / COARSE_LOCATION are stripped here at merge
-         time. ACCESS_NETWORK_STATE is kept: MapLibre's ConnectivityReceiver
+         INTERNET / WIFI_STATE are stripped here at merge time.
+         ACCESS_NETWORK_STATE is kept: MapLibre's ConnectivityReceiver
          calls ConnectivityManager from its CONNECTIVITY_CHANGE handler and
          crashes with SecurityException without it (DOCUMENTATION.md
          §Permissions). It grants no network access — the app still holds no
-         INTERNET permission. -->
+         INTERNET permission.
+         ACCESS_COARSE_LOCATION is kept too: on Android 12+ (targetSdk 31+) an
+         app that requests FINE location must also request COARSE, or the user
+         never gets the coarse-only grant option and lint fails the build
+         (DOCUMENTATION.md §Permissions). FINE implies COARSE, so the extra
+         declaration adds no capability. -->
     <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" tools:node="remove" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
