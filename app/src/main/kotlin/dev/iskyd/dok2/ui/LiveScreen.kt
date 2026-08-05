@@ -221,6 +221,10 @@ fun LiveScreen(trackRepository: TrackRepository) {
                 }
             },
             onDismiss = { saveDialog = false },
+            onDiscard = {
+                saveDialog = false
+                sendAction(context, RecordingService.ACTION_DISCARD)
+            },
         )
     }
 }

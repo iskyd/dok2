@@ -156,7 +156,7 @@ The *displayed* speed value is smoothed over a 30-second window so the number do
         RECORDING ──user pause──► MANUAL_PAUSED ───────────────────────────┘
         AUTO_PAUSED ──user pause──► MANUAL_PAUSED
 
-        any state ──stop──► IDLE (track finalised)
+        any state ──stop──► IDLE (track finalised or discarded)
 ```
 
 ### Rules

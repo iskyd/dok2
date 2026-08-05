@@ -137,6 +137,7 @@ class RecordingService : Service() {
             ACTION_PAUSE_RESUME -> togglePauseResume()
             ACTION_WAYPOINT -> saveWaypoint()
             ACTION_STOP -> stopRecording()
+            ACTION_DISCARD -> discardRecording()
         }
         return START_STICKY
     }
@@ -347,6 +348,26 @@ class RecordingService : Service() {
                 teardownRecording()
             } catch (error: Exception) {
                 Log.e(TAG, "failed to finalise track $id", error)
+                teardownRecording()
+            }
+        }
+    }
+
+    /**
+     * Stops recording and deletes the track without saving — the "Don't save" choice in the stop
+     * dialog. The deletion is transactional, same as cancelling during calibration; the track is
+     * gone rather than finalised, and no thumbnail exists yet (thumbnails are written on finalise).
+     */
+    private fun discardRecording() {
+        val id = trackId ?: return
+        serviceScope.launch {
+            try {
+                val now = System.currentTimeMillis()
+                stateMachine.stop(now)
+                trackRepository.deleteTrack(id)
+                teardownRecording()
+            } catch (error: Exception) {
+                Log.e(TAG, "failed to discard track $id", error)
                 teardownRecording()
             }
         }
@@ -695,6 +716,7 @@ class RecordingService : Service() {
         const val ACTION_PAUSE_RESUME = "dev.iskyd.dok2.recording.action.PAUSE_RESUME"
         const val ACTION_WAYPOINT = "dev.iskyd.dok2.recording.action.WAYPOINT"
         const val ACTION_STOP = "dev.iskyd.dok2.recording.action.STOP"
+        const val ACTION_DISCARD = "dev.iskyd.dok2.recording.action.DISCARD"
         const val NOTIFICATION_ID = 1
         private const val TAG = "RecordingService"
         private const val POINT_BUFFER_SIZE = 10
