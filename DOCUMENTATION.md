@@ -161,7 +161,7 @@ The *displayed* speed value is smoothed over a 30-second window so the number do
 
 ### Rules
 
-- **A fresh recording enters `CALIBRATING` first.** For up to 60 s the barometer solves its baseline against GNSS altitudes; no trackpoints are written and no clock runs. Recording proper starts when the user taps *Start recording* (or after the 60 s window if calibration cannot complete — the fallback baseline is used). Barometer-less devices skip the phase; resuming an interrupted track starts recording immediately.
+- **A fresh recording enters `CALIBRATING` first.** For up to 60 s the barometer solves its baseline against GNSS altitudes; no trackpoints are written and no clock runs. When the phase ends the UI reports the outcome — baseline solved, or the 60 s window elapsed with the standard baseline in use — and the user taps *Start recording*. The start-anyway check runs a few seconds after the window so the baseline-solving fix can land first. Barometer-less devices skip the phase; resuming an interrupted track starts recording immediately.
 - **Auto-pause** triggers after 60 s with no accepted displacement, and clears automatically on the next accepted displacement.
 - **Manual pause** is entered and left only by the user. **Auto-pause logic is suspended while manually paused** — movement does not silently resume the track. This is the point of manual pause: you are being driven to a trailhead, or wandering around camp.
 - **Distance, elevation gain and moving time accumulate only in `RECORDING`.** Elapsed time accumulates in all non-idle states except `CALIBRATING`.
@@ -194,7 +194,7 @@ GNSS vertical error is 2–3× horizontal. Naively summing GNSS altitude deltas 
 altitude = 44330 × (1 − (p / p₀)^(1/5.255))
 ```
 
-**Calibration.** Happens during the `CALIBRATING` phase, before recording starts: for up to 60 s, collect GNSS altitudes with accuracy better than 15 m, take the median, and solve for `p₀` so the barometric altitude matches. If no usable GNSS altitude arrives, fall back to 1013.25 hPa and set `tracks.calibrated = 0` — recording then starts anyway.
+**Calibration.** Happens during the `CALIBRATING` phase, before recording starts: for up to 60 s, collect GNSS altitudes with accuracy better than 15 m, take the median, and solve for `p₀` so the barometric altitude matches. If no usable GNSS altitude arrives, fall back to 1013.25 hPa and set `tracks.calibrated = 0` — recording then starts anyway, and the UI reports whether the baseline was solved or the window elapsed.
 
 **Drift correction.** Weather shifts the baseline by 50–100 m over a day. Every 5 minutes:
 

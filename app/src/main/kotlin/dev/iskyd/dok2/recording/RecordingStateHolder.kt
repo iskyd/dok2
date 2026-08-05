@@ -5,6 +5,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.maplibre.android.geometry.LatLng
 
+/** How the calibration phase ended, surfaced to the user before recording starts. */
+enum class CalibrationOutcome {
+    /** The barometer baseline was solved against GNSS altitudes. */
+    SUCCESS,
+
+    /** The 60 s window elapsed without a usable GNSS altitude; the standard baseline is in use. */
+    TIMEOUT_FALLBACK,
+}
+
 /**
  * The process-wide holder of recording state, updated only by [RecordingService] and read by the
  * UI. It survives activity and composition recreation because it is a process-scoped singleton; the
@@ -58,6 +67,15 @@ object RecordingStateHolder {
      * every other state.
      */
     val calibrationReady: StateFlow<Boolean> = _calibrationReady
+
+    private val _calibrationOutcome = MutableStateFlow<CalibrationOutcome?>(null)
+
+    /**
+     * How the calibration phase ended: [CalibrationOutcome.SUCCESS] once the baseline was solved,
+     * [CalibrationOutcome.TIMEOUT_FALLBACK] when the 60 s window elapsed without one. Null while
+     * the phase is still running (or outside it).
+     */
+    val calibrationOutcome: StateFlow<CalibrationOutcome?> = _calibrationOutcome
 
     private val _elevationGainM = MutableStateFlow<Double?>(null)
 
@@ -130,6 +148,10 @@ object RecordingStateHolder {
         _calibrationReady.value = ready
     }
 
+    internal fun setCalibrationOutcome(outcome: CalibrationOutcome?) {
+        _calibrationOutcome.value = outcome
+    }
+
     internal fun setElevationGainM(gainM: Double?) {
         _elevationGainM.value = gainM
     }
@@ -151,6 +173,7 @@ object RecordingStateHolder {
         _currentAltitudeM.value = null
         _barometerCalibrated.value = false
         _calibrationReady.value = false
+        _calibrationOutcome.value = null
         _elevationGainM.value = null
         _elevationLossM.value = null
         _lastLatLng.value = null

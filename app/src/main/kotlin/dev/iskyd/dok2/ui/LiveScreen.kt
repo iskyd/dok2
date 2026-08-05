@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import dev.iskyd.dok2.data.repo.TrackRepository
 import dev.iskyd.dok2.domain.model.RecordingState
+import dev.iskyd.dok2.recording.CalibrationOutcome
 import dev.iskyd.dok2.recording.RecordingService
 import dev.iskyd.dok2.recording.RecordingStateHolder
 import java.text.SimpleDateFormat
@@ -52,6 +53,7 @@ fun LiveScreen(trackRepository: TrackRepository) {
     val elevationLossM by RecordingStateHolder.elevationLossM.collectAsState()
     val barometerCalibrated by RecordingStateHolder.barometerCalibrated.collectAsState()
     val calibrationReady by RecordingStateHolder.calibrationReady.collectAsState()
+    val calibrationOutcome by RecordingStateHolder.calibrationOutcome.collectAsState()
     val movingTimeMs by RecordingStateHolder.movingTimeMs.collectAsState()
     val movingSegmentStartMs by RecordingStateHolder.movingTimeSegmentStartMs.collectAsState()
     val liveTrackId by RecordingStateHolder.openTrackId.collectAsState()
@@ -86,7 +88,7 @@ fun LiveScreen(trackRepository: TrackRepository) {
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = stateLabel(state),
+            text = stateLabel(state, calibrationReady),
             style = MaterialTheme.typography.headlineMedium,
             color = MaterialTheme.colorScheme.primary,
         )
@@ -96,10 +98,11 @@ fun LiveScreen(trackRepository: TrackRepository) {
             Spacer(Modifier.height(4.dp))
             Text(
                 text =
-                    if (barometerCalibrated) {
-                        "${it.toInt()} m"
-                    } else {
-                        "${it.toInt()} m · calibrating…"
+                    when {
+                        barometerCalibrated -> "${it.toInt()} m"
+                        state == RecordingState.Calibrating && calibrationReady ->
+                            "${it.toInt()} m · standard baseline"
+                        else -> "${it.toInt()} m · calibrating…"
                     },
                 style = MaterialTheme.typography.bodyLarge,
             )
@@ -121,12 +124,29 @@ fun LiveScreen(trackRepository: TrackRepository) {
                 )
             }
         }
-        // The first minute of every recording the barometer solves its baseline against GNSS
-        // altitudes; until then the shown altitude is a fallback estimate.
-        if (state != RecordingState.Idle && !barometerCalibrated) {
+        // The barometer solves its baseline against GNSS altitudes in the calibration window;
+        // until then the shown altitude is a fallback estimate. Once the phase ends the insight
+        // reports whether the baseline was solved or the 60 s window elapsed without one.
+        val calibrationInsight =
+            when {
+                state == RecordingState.Calibrating && calibrationReady ->
+                    when (calibrationOutcome) {
+                        CalibrationOutcome.SUCCESS ->
+                            "Calibration successful — altitude readings will be accurate."
+                        CalibrationOutcome.TIMEOUT_FALLBACK ->
+                            "60 s elapsed without clear GPS — using the standard baseline."
+                        null -> null
+                    }
+                state == RecordingState.Calibrating ->
+                    "Altitude calibrating — needs ~1 min with clear sky."
+                state != RecordingState.Idle && !barometerCalibrated ->
+                    "Altitude calibrating — needs ~1 min with clear sky."
+                else -> null
+            }
+        if (calibrationInsight != null) {
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "Altitude calibrating — needs ~1 min with clear sky.",
+                text = calibrationInsight,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -212,14 +232,16 @@ private fun sendAction(context: Context, action: String) {
     )
 }
 
-private fun stateLabel(state: RecordingState): String =
-    when (state) {
+private fun stateLabel(state: RecordingState, calibrationReady: Boolean): String {
+    if (state == RecordingState.Calibrating && calibrationReady) return "CALIBRATION DONE"
+    return when (state) {
         RecordingState.Calibrating -> "CALIBRATING"
         RecordingState.Recording -> "RECORDING"
         RecordingState.AutoPaused -> "AUTO PAUSED"
         RecordingState.ManualPaused -> "PAUSED"
         RecordingState.Idle -> "IDLE"
     }
+}
 
 private fun formatDistance(distanceM: Double): String =
     if (distanceM >= 1000) {

@@ -96,10 +96,15 @@ class RecordingService : Service() {
     /** True once the calibration phase finished; gates the "Start recording" action. */
     private var calibrationReady = false
 
-    /** Ends the calibration phase at the window timeout even without a solved baseline. */
+    /** How the calibration phase ended, shown to the user; set together with [calibrationReady]. */
+    private var calibrationOutcome: CalibrationOutcome? = null
+
+    /**
+     * Ends the calibration phase shortly after the window timeout even without a solved baseline.
+     */
     private val calibrationTimeoutRunnable = Runnable {
         Log.d(TAG, "calibration window elapsed; ready to start recording")
-        finishCalibration()
+        finishCalibration(CalibrationOutcome.TIMEOUT_FALLBACK)
     }
 
     /** The most recent fix, used for the Waypoint action. */
@@ -205,6 +210,7 @@ class RecordingService : Service() {
             stateMachine.start(now)
         }
         RecordingStateHolder.setCalibrationReady(false)
+        RecordingStateHolder.setCalibrationOutcome(null)
         scheduleWatchdog(this)
         registerPressureSensor()
         requestLocationUpdates(requestedIntervalMs)
@@ -222,13 +228,20 @@ class RecordingService : Service() {
         resetPipelines()
         stateMachine.startCalibration(now)
         calibrationReady = false
+        calibrationOutcome = null
         RecordingStateHolder.setCalibrationReady(false)
+        RecordingStateHolder.setCalibrationOutcome(null)
         barometer.start(now)
         scheduleWatchdog(this)
         registerPressureSensor()
         requestLocationUpdates(requestedIntervalMs)
         handler.removeCallbacks(calibrationTimeoutRunnable)
-        handler.postDelayed(calibrationTimeoutRunnable, CALIBRATION_TIMEOUT_MS)
+        // The grace lets the first post-window fix land and solve the baseline before the
+        // fallback outcome is declared, so the success/timeout insight is accurate.
+        handler.postDelayed(
+            calibrationTimeoutRunnable,
+            CALIBRATION_TIMEOUT_MS + CALIBRATION_GRACE_MS,
+        )
         updateNotification()
         Log.d(TAG, "calibration phase started")
     }
@@ -248,11 +261,13 @@ class RecordingService : Service() {
         beginRecordingSession(id, System.currentTimeMillis(), fromCalibration = true)
     }
 
-    private fun finishCalibration() {
+    private fun finishCalibration(outcome: CalibrationOutcome) {
         if (calibrationReady) return
         calibrationReady = true
+        calibrationOutcome = outcome
         handler.removeCallbacks(calibrationTimeoutRunnable)
         RecordingStateHolder.setCalibrationReady(true)
+        RecordingStateHolder.setCalibrationOutcome(outcome)
         updateNotification()
     }
 
@@ -368,7 +383,7 @@ class RecordingService : Service() {
             RecordingStateHolder.setBarometerCalibrated(barometer.calibrated)
             RecordingStateHolder.setLastLatLng(LatLng(fix.latDeg, fix.lonDeg))
             if (barometer.calibrated) {
-                finishCalibration()
+                finishCalibration(CalibrationOutcome.SUCCESS)
             }
             return
         }
@@ -506,6 +521,7 @@ class RecordingService : Service() {
         cancelWatchdog(this)
         handler.removeCallbacks(calibrationTimeoutRunnable)
         calibrationReady = false
+        calibrationOutcome = null
         sensorManager.unregisterListener(pressureListener)
         locationManager.removeUpdates(locationListener)
         pointBuffer.clear()
@@ -621,7 +637,9 @@ class RecordingService : Service() {
             when {
                 System.currentTimeMillis() < waypointFlashUntilMs -> "Waypoint saved"
                 calibrating && !calibrationReady -> "Calibrating altitude…"
-                calibrating -> "Calibration complete — start recording"
+                calibrating && calibrationOutcome == CalibrationOutcome.SUCCESS ->
+                    "Baseline solved — start recording"
+                calibrating -> "Standard baseline in use — start recording"
                 stateMachine.state == RecordingState.Recording -> "Recording"
                 stateMachine.state == RecordingState.AutoPaused -> "Auto-paused"
                 stateMachine.state == RecordingState.ManualPaused -> "Paused"
@@ -684,5 +702,10 @@ class RecordingService : Service() {
 
         /** Matches [Barometer.Config.calibrationWindowMs]; the phase lasts at most one minute. */
         private const val CALIBRATION_TIMEOUT_MS = 60_000L
+
+        /**
+         * Head start for the post-window fix to solve the baseline before the fallback is declared.
+         */
+        private const val CALIBRATION_GRACE_MS = 5_000L
     }
 }
