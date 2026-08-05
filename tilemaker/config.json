@@ -1,0 +1,21 @@
+{
+	"layers": {
+		"landuse": { "minzoom": 0, "maxzoom": 15, "simplify_below": 13, "simplify_level": 0.0003, "simplify_algorithm": "visvalingam" },
+		"water":   { "minzoom": 0, "maxzoom": 15, "simplify_below": 13, "simplify_level": 0.0003, "simplify_algorithm": "visvalingam" },
+		"contour": { "minzoom": 0, "maxzoom": 15 },
+		"path":    { "minzoom": 0, "maxzoom": 15 },
+		"track":   { "minzoom": 0, "maxzoom": 15 },
+		"peak":    { "minzoom": 0, "maxzoom": 15 },
+		"hut":     { "minzoom": 0, "maxzoom": 15 }
+	},
+	"settings": {
+		"minzoom": 0,
+		"maxzoom": 15,
+		"basezoom": 15,
+		"include_ids": false,
+		"compress": "gzip",
+		"name": "dok2 offline basemap",
+		"version": "1.0",
+		"description": "Hiking basemap for dok2: landuse, water, contour, path, track, peak, hut"
+	}
+}
