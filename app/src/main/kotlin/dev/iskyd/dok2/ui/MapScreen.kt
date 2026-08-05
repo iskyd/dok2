@@ -22,19 +22,34 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import dev.iskyd.dok2.data.map.MapRegionRepository
+import dev.iskyd.dok2.data.prefs.AppSettings
+import dev.iskyd.dok2.data.prefs.SettingsRepository
 import dev.iskyd.dok2.data.repo.TrackRepository
 import dev.iskyd.dok2.domain.model.TrackPoint
 import dev.iskyd.dok2.recording.RecordingStateHolder
+import java.io.File
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.FillLayer
+import org.maplibre.android.style.layers.Layer
 import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.PropertyFactory.circleColor
+import org.maplibre.android.style.layers.PropertyFactory.circleRadius
+import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
+import org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth
+import org.maplibre.android.style.layers.PropertyFactory.fillColor
+import org.maplibre.android.style.layers.PropertyFactory.fillOpacity
 import org.maplibre.android.style.layers.PropertyFactory.lineColor
+import org.maplibre.android.style.layers.PropertyFactory.lineDasharray
 import org.maplibre.android.style.layers.PropertyFactory.lineWidth
 import org.maplibre.android.style.sources.GeoJsonSource
+import org.maplibre.android.style.sources.VectorSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
@@ -47,16 +62,30 @@ import org.maplibre.geojson.Point
  * last fix; the location engine stays in [dev.iskyd.dok2.recording.RecordingService].
  */
 @Composable
-fun MapScreen(trackRepository: TrackRepository) {
+fun MapScreen(
+    trackRepository: TrackRepository,
+    mapRegionRepository: MapRegionRepository,
+    settingsRepository: SettingsRepository,
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val openTrackId by RecordingStateHolder.openTrackId.collectAsState()
     val lastLatLng by RecordingStateHolder.lastLatLng.collectAsState()
+    val settings by settingsRepository.settingsFlow.collectAsState(initial = AppSettings())
 
     var points by remember { mutableStateOf<List<TrackPoint>>(emptyList()) }
     LaunchedEffect(openTrackId) {
         points = openTrackId?.let { trackRepository.getPoints(it) } ?: emptyList()
     }
+
+    // The active region file, re-resolved whenever the configured file name changes. [activeFile]
+    // re-checks the file on disk, so a setting pointing at a deleted file reads as "no region".
+    var regionFile by remember { mutableStateOf<File?>(null) }
+    LaunchedEffect(settings.activeMapFileName) { regionFile = mapRegionRepository.activeFile() }
+
+    // The file name the region source was last (re)bound to; suppresses the redundant rebind
+    // right after the style-ready callback adds the source.
+    var appliedFileName by remember { mutableStateOf<String?>(null) }
 
     val mapView = remember {
         MapLibre.getInstance(context)
@@ -84,6 +113,36 @@ fun MapScreen(trackRepository: TrackRepository) {
         }
     }
 
+    LaunchedEffect(regionFile) {
+        val loadedMap = map
+        val style = loadedMap?.getStyle()
+        if (!styleReady || style == null) return@LaunchedEffect
+        val source = style.getSource(REGION_SOURCE_ID) as? VectorSource
+        val file = regionFile
+        when {
+            file == null -> {
+                if (source != null) {
+                    removeBasemapLayers(style)
+                    style.removeSource(REGION_SOURCE_ID)
+                    appliedFileName = null
+                }
+            }
+            source == null -> {
+                style.addSource(VectorSource(REGION_SOURCE_ID, pmtilesUrl(file)))
+                basemapLayers().forEach(style::addLayer)
+                appliedFileName = file.name
+            }
+            appliedFileName != file.name -> {
+                // VectorSource has no setUrl in MapLibre 12.3.1: rebind by re-adding the source
+                // under the same id (the layers keep referencing the id, so they pick up the new
+                // archive without being re-added).
+                style.removeSource(REGION_SOURCE_ID)
+                style.addSource(VectorSource(REGION_SOURCE_ID, pmtilesUrl(file)))
+                appliedFileName = file.name
+            }
+        }
+    }
+
     Box(Modifier.fillMaxSize()) {
         AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize()) { _ ->
             val loadedMap = map
@@ -93,6 +152,11 @@ fun MapScreen(trackRepository: TrackRepository) {
                     mapView.getMapAsync { loaded ->
                         map = loaded
                         loaded.setStyle(Style.Builder().fromUri(STYLE_URL)) { style ->
+                            regionFile?.let { file ->
+                                style.addSource(VectorSource(REGION_SOURCE_ID, pmtilesUrl(file)))
+                                basemapLayers().forEach(style::addLayer)
+                                appliedFileName = file.name
+                            }
                             style.addSource(
                                 GeoJsonSource(
                                     TRACK_SOURCE_ID,
@@ -112,7 +176,13 @@ fun MapScreen(trackRepository: TrackRepository) {
                 }
             }
         }
-        if (openTrackId == null) {
+        val hintText =
+            when {
+                openTrackId == null -> "Start recording to see your track"
+                regionFile == null -> "No map data — add a region file in Settings"
+                else -> null
+            }
+        if (hintText != null) {
             Surface(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
                 shape = MaterialTheme.shapes.medium,
@@ -120,7 +190,7 @@ fun MapScreen(trackRepository: TrackRepository) {
                 tonalElevation = 2.dp,
             ) {
                 Text(
-                    text = "Start recording to see your track",
+                    text = hintText,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 )
@@ -144,9 +214,104 @@ private fun syncMap(map: MapLibreMap, points: List<TrackPoint>, lastLatLng: LatL
     }
 }
 
+private fun pmtilesUrl(file: File): String = "pmtiles://file://" + file.absolutePath
+
+/**
+ * The basemap layers for the seven Tilemaker source-layers, in draw order: fills below, then lines,
+ * then circles. Water renders as both fill and line. The source-layer names are the contract with
+ * the Tilemaker profile and must not be renamed.
+ */
+private fun basemapLayers(): List<Layer> =
+    listOf(
+        FillLayer(LANDUSE_LAYER_ID, REGION_SOURCE_ID)
+            .withSourceLayer("landuse")
+            .withProperties(fillColor(LANDUSE_FILL_COLOR), fillOpacity(LANDUSE_FILL_OPACITY)),
+        FillLayer(WATER_FILL_LAYER_ID, REGION_SOURCE_ID)
+            .withSourceLayer("water")
+            .withProperties(fillColor(WATER_FILL_COLOR), fillOpacity(WATER_FILL_OPACITY)),
+        LineLayer(WATER_LINE_LAYER_ID, REGION_SOURCE_ID)
+            .withSourceLayer("water")
+            .withProperties(lineColor(WATER_LINE_COLOR), lineWidth(WATER_LINE_WIDTH)),
+        LineLayer(CONTOUR_LAYER_ID, REGION_SOURCE_ID)
+            .withSourceLayer("contour")
+            .withProperties(lineColor(CONTOUR_COLOR), lineWidth(CONTOUR_WIDTH)),
+        LineLayer(PATH_LAYER_ID, REGION_SOURCE_ID)
+            .withSourceLayer("path")
+            .withProperties(lineColor(PATH_COLOR), lineWidth(PATH_WIDTH), lineDasharray(PATH_DASH)),
+        LineLayer(TRACK_FEATURE_LAYER_ID, REGION_SOURCE_ID)
+            .withSourceLayer("track")
+            .withProperties(lineColor(TRACK_FEATURE_COLOR), lineWidth(TRACK_FEATURE_WIDTH)),
+        CircleLayer(PEAK_LAYER_ID, REGION_SOURCE_ID)
+            .withSourceLayer("peak")
+            .withProperties(
+                circleColor(PEAK_COLOR),
+                circleRadius(PEAK_RADIUS),
+                circleStrokeColor(PEAK_STROKE_COLOR),
+                circleStrokeWidth(PEAK_STROKE_WIDTH),
+            ),
+        CircleLayer(HUT_LAYER_ID, REGION_SOURCE_ID)
+            .withSourceLayer("hut")
+            .withProperties(
+                circleColor(HUT_COLOR),
+                circleRadius(HUT_RADIUS),
+                circleStrokeColor(HUT_STROKE_COLOR),
+                circleStrokeWidth(HUT_STROKE_WIDTH),
+            ),
+    )
+
+private fun removeBasemapLayers(style: Style) {
+    BASEMAP_LAYER_IDS.forEach(style::removeLayer)
+}
+
 private const val STYLE_URL = "asset://style.json"
 private const val TRACK_SOURCE_ID = "track-source"
 private const val TRACK_LAYER_ID = "track-layer"
 private const val TRACK_COLOR = "#2E7D32"
 private const val TRACK_WIDTH = 4f
 private const val CAMERA_ZOOM = 15.0
+
+private const val REGION_SOURCE_ID = "region-source"
+private const val LANDUSE_LAYER_ID = "landuse-fill"
+private const val WATER_FILL_LAYER_ID = "water-fill"
+private const val WATER_LINE_LAYER_ID = "water-line"
+private const val CONTOUR_LAYER_ID = "contour-line"
+private const val PATH_LAYER_ID = "path-line"
+private const val TRACK_FEATURE_LAYER_ID = "track-line"
+private const val PEAK_LAYER_ID = "peak-circle"
+private const val HUT_LAYER_ID = "hut-circle"
+private val BASEMAP_LAYER_IDS =
+    listOf(
+        LANDUSE_LAYER_ID,
+        WATER_FILL_LAYER_ID,
+        WATER_LINE_LAYER_ID,
+        CONTOUR_LAYER_ID,
+        PATH_LAYER_ID,
+        TRACK_FEATURE_LAYER_ID,
+        PEAK_LAYER_ID,
+        HUT_LAYER_ID,
+    )
+
+private const val LANDUSE_FILL_COLOR = "#D6E4C0"
+private const val LANDUSE_FILL_OPACITY = 0.7f
+private const val WATER_FILL_COLOR = "#A8C8E0"
+private const val WATER_FILL_OPACITY = 0.8f
+private const val WATER_LINE_COLOR = "#5B9BD5"
+private const val WATER_LINE_WIDTH = 1f
+private const val CONTOUR_COLOR = "#B08968"
+private const val CONTOUR_WIDTH = 0.8f
+private const val PATH_COLOR = "#7CB342"
+private const val PATH_WIDTH = 2f
+
+// PropertyFactory.lineDasharray takes a boxed Float[] (there is no float[] overload), so this must
+// be an Array<Float>, not FloatArray.
+private val PATH_DASH = arrayOf(2f, 1.5f)
+private const val TRACK_FEATURE_COLOR = "#558B2F"
+private const val TRACK_FEATURE_WIDTH = 2.5f
+private const val PEAK_COLOR = "#C62828"
+private const val PEAK_RADIUS = 4f
+private const val PEAK_STROKE_COLOR = "#FFFFFF"
+private const val PEAK_STROKE_WIDTH = 1f
+private const val HUT_COLOR = "#6D4C41"
+private const val HUT_RADIUS = 3.5f
+private const val HUT_STROKE_COLOR = "#FFFFFF"
+private const val HUT_STROKE_WIDTH = 1f

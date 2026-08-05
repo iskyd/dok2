@@ -142,8 +142,17 @@ private fun MainScaffold(app: Dok2Application) {
             when (screen) {
                 AppScreen.LIBRARY -> LibraryScreen(trackRepository = app.trackRepository)
                 AppScreen.LIVE -> LiveScreen(trackRepository = app.trackRepository)
-                AppScreen.MAP -> MapScreen(trackRepository = app.trackRepository)
-                AppScreen.SETTINGS -> SettingsScreen(settingsRepository = app.settingsRepository)
+                AppScreen.MAP ->
+                    MapScreen(
+                        trackRepository = app.trackRepository,
+                        mapRegionRepository = app.mapRegionRepository,
+                        settingsRepository = app.settingsRepository,
+                    )
+                AppScreen.SETTINGS ->
+                    SettingsScreen(
+                        settingsRepository = app.settingsRepository,
+                        mapRegionRepository = app.mapRegionRepository,
+                    )
             }
         }
     }
