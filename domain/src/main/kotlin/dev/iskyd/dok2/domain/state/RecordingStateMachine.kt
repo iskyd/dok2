@@ -16,30 +16,34 @@ data class PauseEvent(val tMs: Long, val newState: RecordingState)
  * The recording state machine from DOCUMENTATION.md §Recording state machine.
  *
  * ```
- *                  start
- *         IDLE ──────────────► RECORDING ◄─────────┐
- *                                 │  ▲             │
- *         no displacement 60 s    │  │ displacement│ resume
- *                                 ▼  │             │
- *                           AUTO_PAUSED            │
- *                                                  │
- *         RECORDING ──user pause──► MANUAL_PAUSED ─┘
+ *              startCalibration        beginRecording
+ *         IDLE ──────────────► CALIBRATING ──────► RECORDING ◄─────────┐
+ *                                                      │  ▲             │
+ *         no displacement 60 s                         │  │ displacement│ resume
+ *                                                      ▼  │             │
+ *                                                AUTO_PAUSED            │
+ *                                                                       │
+ *         RECORDING ──user pause──► MANUAL_PAUSED ──────────────────────┘
  *         AUTO_PAUSED ──user pause──► MANUAL_PAUSED
  *
  *         any state ──stop──► IDLE (track finalised)
  * ```
  *
  * Pure logic, no timers, no Android: the service drives it with events carrying their own
- * timestamps ([start], [fixAccepted], [autoPauseTimeout], [userPause], [userResume], [stop]).
+ * timestamps ([startCalibration], [beginRecording], [fixAccepted], [autoPauseTimeout], [userPause],
+ * [userResume], [stop]).
  *
  * Rules:
+ * - A fresh recording enters [RecordingState.Calibrating] first, while the barometer solves its
+ *   baseline; no time accumulates and [recordingStartedAtMs] stays null until [beginRecording]
+ *   starts the real activity.
  * - Auto-pause triggers after 60 s with no accepted displacement and clears automatically on the
  *   next accepted displacement.
  * - Manual pause is entered and left only by the user; **auto-pause logic is suspended while
  *   manually paused** — movement does not silently resume a manually paused track (the user's
  *   intent overrides the heuristic).
  * - Moving time accumulates only in [RecordingState.Recording]; elapsed time accumulates in all
- *   non-idle states.
+ *   non-idle states except [RecordingState.Calibrating].
  * - After 2 minutes in [RecordingState.ManualPaused] the GNSS interval drops from 3 s to 30 s (the
  *   trickle — GNSS is never switched off) and is restored on resume.
  */
@@ -53,11 +57,14 @@ class RecordingStateMachine {
     val movingTimeMs: Long
         get() = movingTimeMsValue
 
-    /** Accumulated elapsed time in milliseconds (all time spent in non-idle states). */
+    /**
+     * Accumulated elapsed time in milliseconds (all time spent in non-idle states except
+     * [RecordingState.Calibrating]).
+     */
     val elapsedTimeMs: Long
         get() = elapsedTimeMsValue
 
-    /** Epoch millis the current recording started, or null while idle. */
+    /** Epoch millis the current recording started, or null while idle or calibrating. */
     val recordingStartedAtMs: Long?
         get() = recordingStartedAtMsValue
 
@@ -95,12 +102,37 @@ class RecordingStateMachine {
     }
 
     /**
+     * Enters the calibration phase: IDLE → CALIBRATING. While calibrating the service feeds the
+     * barometer so it can solve its baseline, but no time accumulates and no points are captured;
+     * the real recording begins on [beginRecording]. No-op (returns false) unless idle.
+     */
+    fun startCalibration(tMs: Long): Boolean {
+        if (state != RecordingState.Idle) return false
+        state = RecordingState.Calibrating
+        emit(state, tMs)
+        return true
+    }
+
+    /**
+     * Begins the actual recording once calibration completed: CALIBRATING → RECORDING. Sets
+     * [recordingStartedAtMs]; the timer starts here, so the calibration window is not counted.
+     * No-op (returns false) unless calibrating.
+     */
+    fun beginRecording(tMs: Long): Boolean {
+        if (state != RecordingState.Calibrating) return false
+        advance(tMs)
+        recordingStartedAtMsValue = tMs
+        transitionTo(RecordingState.Recording, tMs)
+        return true
+    }
+
+    /**
      * The filter chain accepted a fix that advanced the anchor. Resets the auto-pause timer, and if
      * currently auto-paused, auto-resumes to RECORDING. Movement does **not** resume a manual
      * pause.
      */
     fun fixAccepted(tMs: Long): Boolean {
-        if (state == RecordingState.Idle) return false
+        if (state == RecordingState.Idle || state == RecordingState.Calibrating) return false
         advance(tMs)
         lastAcceptedDisplacementAtMs = tMs
         if (state == RecordingState.AutoPaused) {
@@ -130,7 +162,8 @@ class RecordingStateMachine {
      */
     fun userPause(tMs: Long): Boolean {
         when (state) {
-            RecordingState.Idle -> return false
+            RecordingState.Idle,
+            RecordingState.Calibrating -> return false
             RecordingState.ManualPaused -> {
                 advance(tMs)
                 return false
@@ -204,7 +237,9 @@ class RecordingStateMachine {
                 if (state == RecordingState.Recording) {
                     movingTimeMsValue += duration
                 }
-                if (state != RecordingState.Idle) {
+                // Elapsed time skips CALIBRATING: the timer starts when the activity actually
+                // begins, so the calibration window is never counted against the track.
+                if (state != RecordingState.Idle && state != RecordingState.Calibrating) {
                     elapsedTimeMsValue += duration
                 }
             }

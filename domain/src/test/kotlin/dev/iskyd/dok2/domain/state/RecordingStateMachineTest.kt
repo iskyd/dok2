@@ -261,4 +261,101 @@ class RecordingStateMachineTest {
             )
             .inOrder()
     }
+
+    @Test
+    fun `start calibration transitions idle to calibrating`() {
+        val machine = RecordingStateMachine()
+        val events = mutableListOf<PauseEvent>()
+        machine.addListener { events += it }
+
+        val transitioned = machine.startCalibration(1_000)
+
+        assertThat(transitioned).isTrue()
+        assertThat(machine.state).isEqualTo(RecordingState.Calibrating)
+        assertThat(machine.recordingStartedAtMs).isNull()
+        assertThat(events)
+            .containsExactly(PauseEvent(tMs = 1_000, newState = RecordingState.Calibrating))
+    }
+
+    @Test
+    fun `start calibration is a no-op unless idle`() {
+        val machine = RecordingStateMachine()
+        machine.start(0)
+        assertThat(machine.startCalibration(10_000)).isFalse()
+        assertThat(machine.state).isEqualTo(RecordingState.Recording)
+    }
+
+    @Test
+    fun `begin recording from calibrating moves to recording and starts the clock`() {
+        val machine = RecordingStateMachine()
+        machine.startCalibration(0)
+        val events = mutableListOf<PauseEvent>()
+        machine.addListener { events += it }
+
+        assertThat(machine.beginRecording(60_000)).isTrue()
+        assertThat(machine.state).isEqualTo(RecordingState.Recording)
+        assertThat(machine.recordingStartedAtMs).isEqualTo(60_000)
+        assertThat(events)
+            .containsExactly(PauseEvent(tMs = 60_000, newState = RecordingState.Recording))
+    }
+
+    @Test
+    fun `begin recording is a no-op outside calibrating`() {
+        val machine = RecordingStateMachine()
+        assertThat(machine.beginRecording(10_000)).isFalse()
+        assertThat(machine.state).isEqualTo(RecordingState.Idle)
+
+        machine.start(20_000)
+        assertThat(machine.beginRecording(30_000)).isFalse()
+        assertThat(machine.state).isEqualTo(RecordingState.Recording)
+    }
+
+    @Test
+    fun `elapsed and moving time do not accumulate during calibrating`() {
+        val machine = RecordingStateMachine()
+        machine.startCalibration(0)
+        machine.beginRecording(60_000)
+        machine.fixAccepted(63_000)
+        machine.stop(66_000)
+
+        // Only the 3 s recording spans count; the 60 s calibration window is not elapsed time.
+        assertThat(machine.elapsedTimeMs).isEqualTo(6_000)
+        assertThat(machine.movingTimeMs).isEqualTo(6_000)
+    }
+
+    @Test
+    fun `stop during calibrating finalises to idle without accumulating time`() {
+        val machine = RecordingStateMachine()
+        machine.startCalibration(0)
+
+        assertThat(machine.stop(30_000)).isTrue()
+        assertThat(machine.state).isEqualTo(RecordingState.Idle)
+        assertThat(machine.elapsedTimeMs).isEqualTo(0)
+        assertThat(machine.movingTimeMs).isEqualTo(0)
+        assertThat(machine.recordingStartedAtMs).isNull()
+    }
+
+    @Test
+    fun `accepted displacement during calibrating is a no-op`() {
+        val machine = RecordingStateMachine()
+        machine.startCalibration(0)
+        assertThat(machine.fixAccepted(3_000)).isFalse()
+        assertThat(machine.state).isEqualTo(RecordingState.Calibrating)
+    }
+
+    @Test
+    fun `user pause during calibrating is a no-op`() {
+        val machine = RecordingStateMachine()
+        machine.startCalibration(0)
+        assertThat(machine.userPause(5_000)).isFalse()
+        assertThat(machine.state).isEqualTo(RecordingState.Calibrating)
+    }
+
+    @Test
+    fun `user resume during calibrating is a no-op`() {
+        val machine = RecordingStateMachine()
+        machine.startCalibration(0)
+        assertThat(machine.userResume(5_000)).isFalse()
+        assertThat(machine.state).isEqualTo(RecordingState.Calibrating)
+    }
 }
