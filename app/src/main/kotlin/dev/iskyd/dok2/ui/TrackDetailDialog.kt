@@ -1,8 +1,17 @@
 package dev.iskyd.dok2.ui
 
+import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,6 +38,7 @@ import dev.iskyd.dok2.data.repo.TrackRepository
 import dev.iskyd.dok2.domain.model.ElevationExtremes
 import dev.iskyd.dok2.domain.model.Track
 import java.io.File
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -53,7 +63,34 @@ fun TrackDetailDialog(track: Track, trackRepository: TrackRepository, onDismiss:
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var sharing by remember { mutableStateOf(false) }
+    // One shared state disables both buttons while the (shared, expensive) render runs.
+    var activeAction by remember { mutableStateOf<ImageAction?>(null) }
+
+    // Pre-Q (API 26-28) has no MediaStore.Downloads; fall back to the Storage Access Framework's
+    // system picker so no storage permission is ever requested.
+    val createDocumentLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri
+            ->
+            if (uri != null) {
+                scope.launch {
+                    activeAction = ImageAction.Download
+                    try {
+                        val file = renderStatsImage(context, trackRepository, track, gainM)
+                        withContext(Dispatchers.IO) {
+                            context.contentResolver.openOutputStream(uri)?.use { out ->
+                                file.inputStream().use { it.copyTo(out) }
+                            } ?: throw IOException("Could not open $uri")
+                        }
+                        Toast.makeText(context, "Image saved", Toast.LENGTH_SHORT).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Could not save the image", Toast.LENGTH_SHORT)
+                            .show()
+                    } finally {
+                        activeAction = null
+                    }
+                }
+            }
+        }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -92,60 +129,139 @@ fun TrackDetailDialog(track: Track, trackRepository: TrackRepository, onDismiss:
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = {
-                    sharing = true
-                    scope.launch {
-                        try {
-                            val points = trackRepository.getPoints(track.id)
-                            val uri =
-                                withContext(Dispatchers.Default) {
-                                    val bitmap =
-                                        StatsImageRenderer.render(
-                                            points,
-                                            track.distanceM,
-                                            gainM,
-                                            track.elapsedTimeS,
-                                        )
-                                    val dir = File(context.cacheDir, "shared")
-                                    dir.mkdirs()
-                                    dir.listFiles { _, name -> name.startsWith("dok2-stats-") }
-                                        ?.forEach { it.delete() }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    onClick = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            activeAction = ImageAction.Download
+                            scope.launch {
+                                try {
                                     val file =
-                                        File(dir, "dok2-stats-${System.currentTimeMillis()}.png")
-                                    file.outputStream().use {
-                                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
-                                    }
-                                    bitmap.recycle()
+                                        renderStatsImage(context, trackRepository, track, gainM)
+                                    saveToDownloads(context, file)
+                                    Toast.makeText(
+                                            context,
+                                            "Saved to Downloads",
+                                            Toast.LENGTH_SHORT,
+                                        )
+                                        .show()
+                                } catch (e: Exception) {
+                                    Toast.makeText(
+                                            context,
+                                            "Could not save the image",
+                                            Toast.LENGTH_SHORT,
+                                        )
+                                        .show()
+                                } finally {
+                                    activeAction = null
+                                }
+                            }
+                        } else {
+                            createDocumentLauncher.launch(
+                                "dok2-stats-${System.currentTimeMillis()}.png"
+                            )
+                        }
+                    },
+                    enabled = activeAction == null,
+                ) {
+                    Text(
+                        if (activeAction == ImageAction.Download) "Generating…"
+                        else "Download image"
+                    )
+                }
+                TextButton(
+                    onClick = {
+                        activeAction = ImageAction.Share
+                        scope.launch {
+                            try {
+                                val file = renderStatsImage(context, trackRepository, track, gainM)
+                                val uri =
                                     FileProvider.getUriForFile(
                                         context,
                                         "${context.packageName}.fileprovider",
                                         file,
                                     )
-                                }
-                            val intent =
-                                Intent(Intent.ACTION_SEND).apply {
-                                    type = "image/png"
-                                    putExtra(Intent.EXTRA_STREAM, uri)
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                            context.startActivity(Intent.createChooser(intent, "Share stats image"))
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Could not share the image", Toast.LENGTH_SHORT)
-                                .show()
-                        } finally {
-                            sharing = false
+                                val intent =
+                                    Intent(Intent.ACTION_SEND).apply {
+                                        type = "image/png"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                context.startActivity(
+                                    Intent.createChooser(intent, "Share stats image")
+                                )
+                            } catch (e: Exception) {
+                                Toast.makeText(
+                                        context,
+                                        "Could not share the image",
+                                        Toast.LENGTH_SHORT,
+                                    )
+                                    .show()
+                            } finally {
+                                activeAction = null
+                            }
                         }
-                    }
-                },
-                enabled = !sharing,
-            ) {
-                Text(if (sharing) "Generating…" else "Share image")
+                    },
+                    enabled = activeAction == null,
+                ) {
+                    Text(if (activeAction == ImageAction.Share) "Generating…" else "Share image")
+                }
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
 }
+
+/** The image action currently running; both buttons are disabled while one is. */
+private enum class ImageAction {
+    Share,
+    Download,
+}
+
+/** Renders the stats PNG into a fresh cache file and returns it. */
+private suspend fun renderStatsImage(
+    context: Context,
+    trackRepository: TrackRepository,
+    track: Track,
+    gainM: Double?,
+): File {
+    val points = trackRepository.getPoints(track.id)
+    return withContext(Dispatchers.Default) {
+        val bitmap = StatsImageRenderer.render(points, track.distanceM, gainM, track.elapsedTimeS)
+        val dir = File(context.cacheDir, "shared")
+        dir.mkdirs()
+        dir.listFiles { _, name -> name.startsWith("dok2-stats-") }?.forEach { it.delete() }
+        val file = File(dir, "dok2-stats-${System.currentTimeMillis()}.png")
+        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+        file
+    }
+}
+
+/**
+ * Copies [file] into the public Downloads collection via MediaStore. API 29+ only: scoped storage
+ * allows writing there without any permission. Returns the new content URI.
+ */
+@RequiresApi(Build.VERSION_CODES.Q)
+private suspend fun saveToDownloads(context: Context, file: File): Uri =
+    withContext(Dispatchers.IO) {
+        val values =
+            ContentValues().apply {
+                put(
+                    MediaStore.Downloads.DISPLAY_NAME,
+                    "dok2-stats-${System.currentTimeMillis()}.png",
+                )
+                put(MediaStore.Downloads.MIME_TYPE, "image/png")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            }
+        val uri =
+            context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: throw IOException("MediaStore insert returned null")
+        context.contentResolver.openOutputStream(uri)?.use { out ->
+            file.inputStream().use { it.copyTo(out) }
+        } ?: throw IOException("Could not open output stream for $uri")
+        uri
+    }
 
 @Composable
 private fun StatsRow(first: Pair<String, String>, second: Pair<String, String>) {
