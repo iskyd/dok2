@@ -28,10 +28,9 @@ Pre-alpha. Nothing works yet. See [DOCUMENTATION.md](DOCUMENTATION.md) for the d
 
 The app has no network access, so it cannot download anything. You supply the data:
 
-1. Build a `.pmtiles` file for your region with [Tilemaker](https://tilemaker.org) from a [Geofabrik](https://download.geofabrik.de) extract.
-2. Download the SRTM `.hgt` tiles covering the same area.
-3. Copy both into a folder on the phone.
-4. Point the app at that folder on first launch.
+1. Build a `.pmtiles` file for your region with [Tilemaker](https://tilemaker.org) from a [Geofabrik](https://download.geofabrik.de) extract, using the profile in `tilemaker/`.
+2. Copy the file onto the phone.
+3. In the app: Settings → Map data → Choose region file, and pick it.
 
 Details in [DOCUMENTATION.md](DOCUMENTATION.md#map-and-elevation-data).
 

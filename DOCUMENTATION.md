@@ -315,17 +315,21 @@ Platform file-based encryption only. SQLCipher costs CPU on every read and write
 
 ## Map and elevation data
 
-MapLibre Native rendering vector tiles from a **PMTiles** file. One file per region — trivially copyable, deletable and inspectable.
-
-The app has no network permission and cannot download anything. Data is supplied by the user through the Storage Access Framework: pick a folder, drop files in.
+MapLibre Native rendering vector tiles from a **PMTiles** file. One file per region — trivially copyable, deletable and inspectable. The app has no network permission and cannot download anything; data is supplied by the user.
 
 ### Preparing a region
 
 1. Download a `.osm.pbf` extract from [Geofabrik](https://download.geofabrik.de).
-2. Build tiles with [Tilemaker](https://tilemaker.org) using the project's Lua profile, which keeps paths, tracks, contours, water, peaks, huts and land cover, and drops building footprints and road classification detail. Fewer layers means faster tile decode, less GPU work and smaller files.
-3. Convert or export to `.pmtiles`.
-4. Download the SRTM `.hgt` cells covering the same bounding box.
-5. Copy both into the chosen folder on the device.
+2. Build a `.pmtiles` file with [Tilemaker](https://tilemaker.org) using the project's profile in `tilemaker/` (`config.json` + `process.lua`). The profile keeps paths, tracks, contours, water, peaks, huts and land cover, and drops building footprints and road classification detail. Fewer layers means faster tile decode, less GPU work and smaller files.
+3. Optional: generate contours with `gdal_contour` over SRTM `.hgt` cells and merge them via a shapefile source — Tilemaker has no DEM reader (details in the header of `tilemaker/process.lua`). A build without elevation data simply omits the contour layer.
+4. Copy the `.pmtiles` file onto the device.
+
+### Installing a region
+
+- **Settings → Map data → Choose region file** picks the `.pmtiles` from any storage provider. The file is copied into app-private storage (`filesDir/maps/`) under a sanitized name, so the picker URI is not kept and the region survives the source file being moved or deleted.
+- The header is validated against the PMTiles v3 spec before anything is written; an invalid or truncated file is rejected without side effects.
+- Picking another file replaces the region — the previous file is deleted only after the new copy is complete. Remove clears it. The Map tab binds to the active region and re-renders when it changes.
+- The `maps/` directory is excluded from cloud backup and device transfer (`res/xml/data_extraction_rules.xml`): these are 150–400 MB re-obtainable files that must not go to the cloud.
 
 ### Sizing
 
@@ -333,12 +337,13 @@ The app has no network permission and cannot download anything. Data is supplied
 - A 100 × 100 km hiking region at z15 with contours: 150–400 MB.
 - SRTM 1-arcsecond: ~25 MB per 1° cell.
 
-The region management screen lists what is present and how large it is.
+The Settings Map data section shows the active region's name and size.
 
 ### MapLibre notes
 
 - **The style JSON must declare a `sprite` URL even though the app uses no sprites.** MapLibre Native on Android crashes on initialisation without it. Undocumented; costs people hours.
-- PMTiles loads over `file://`.
+- The basemap loads from a local file: `VectorSource` with `pmtiles://file://` + the absolute path. No remote tiles, no remote style.
+- The seven basemap layers render exactly the source-layer names in `tilemaker/process.lua` (landuse, water, contour, path, track, peak, hut) — renaming one silently blanks the map.
 - The GL surface is destroyed whenever the map is not visible. See [Battery](#battery).
 
 ---
