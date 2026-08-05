@@ -3,6 +3,7 @@ package dev.iskyd.dok2.data.map
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
 import com.google.common.truth.Truth.assertThat
 import dev.iskyd.dok2.data.prefs.SettingsRepository
 import dev.iskyd.dok2.domain.map.PmtilesValidator
@@ -10,6 +11,8 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.fail
@@ -98,6 +101,37 @@ class MapRegionRepositoryTest {
 
         assertThat(mapsDir.listFiles().orEmpty()).isEmpty()
         assertThat(repository.activeFileName()).isNull()
+    }
+
+    @Test
+    fun `settings write failure after a complete copy fails and leaves no file`() = runTest {
+        val mapsDir = temporaryFolder.newFolder("maps")
+        val dataStore = FailingAfterNWritesDataStore(failOnWrite = 0)
+        val repository =
+            MapRegionRepository(mapsDir, PmtilesValidator(), SettingsRepository(dataStore))
+
+        assertFailed(repository.import("alps.pmtiles", ByteArrayInputStream(archive())))
+
+        assertThat(mapsDir.listFiles().orEmpty()).isEmpty()
+        assertThat(repository.activeFileName()).isNull()
+    }
+
+    @Test
+    fun `remove tolerates a failing settings write and still deletes the file`() = runTest {
+        val mapsDir = temporaryFolder.newFolder("maps")
+        val dataStore = FailingAfterNWritesDataStore(failOnWrite = 1)
+        val repository =
+            MapRegionRepository(mapsDir, PmtilesValidator(), SettingsRepository(dataStore))
+
+        assertImported(
+            repository.import("alps.pmtiles", ByteArrayInputStream(archive())),
+            "alps.pmtiles",
+        )
+        repository.remove()
+
+        // The file is gone and the stale setting reads as "no region" via the isFile re-check.
+        assertThat(mapsDir.listFiles().orEmpty()).isEmpty()
+        assertThat(repository.activeFile()).isNull()
     }
 
     @Test
@@ -253,6 +287,28 @@ class MapRegionRepositoryTest {
         override fun read(): Int {
             if (index < totalBytes.size) return totalBytes[index++].toInt() and 0xFF
             throw IOException("disk read failed mid-copy")
+        }
+    }
+
+    /**
+     * An in-memory DataStore whose [androidx.datastore.core.DataStore.updateData] throws
+     * [IOException] from the [failOnWrite]-th write on, modelling a disk-full DataStore write. The
+     * repository's settings-write-failure paths are exercised without touching a real file.
+     */
+    private class FailingAfterNWritesDataStore(failOnWrite: Int) : DataStore<Preferences> {
+        private var writesLeft = failOnWrite
+        private val state = MutableStateFlow(emptyPreferences())
+
+        override val data: Flow<Preferences> = state
+
+        override suspend fun updateData(
+            transform: suspend (t: Preferences) -> Preferences
+        ): Preferences {
+            if (writesLeft <= 0) throw IOException("disk full")
+            writesLeft--
+            val updated = transform(state.value)
+            state.value = updated
+            return updated
         }
     }
 }

@@ -83,7 +83,17 @@ class MapRegionRepository(
                 )
             }
             val previousName = settingsRepository.settingsFlow.first().activeMapFileName
-            settingsRepository.setActiveMapFileName(sanitizedName)
+            try {
+                settingsRepository.setActiveMapFileName(sanitizedName)
+            } catch (error: IOException) {
+                // The copy succeeded but the setting could not be persisted (e.g. disk-full on a
+                // DataStore write). Drop the copied file and keep the previous region untouched:
+                // a failed import must not leave a file the startup existence check could pick up.
+                deleteQuietly(target)
+                return@withContext MapRegionImportResult.Failed(
+                    "could not save map settings: ${error.message}"
+                )
+            }
             if (previousName != null && previousName != sanitizedName) {
                 deleteQuietly(File(mapsDir, previousName))
             }
@@ -108,7 +118,12 @@ class MapRegionRepository(
         withContext(Dispatchers.IO) {
             val name = settingsRepository.settingsFlow.first().activeMapFileName
             if (name != null) deleteQuietly(File(mapsDir, name))
-            settingsRepository.setActiveMapFileName(null)
+            try {
+                settingsRepository.setActiveMapFileName(null)
+            } catch (error: IOException) {
+                // The file is already gone; the stale setting reads as "no region" via the
+                // isFile re-check in activeFile, so the next screen visit self-heals.
+            }
         }
     }
 
