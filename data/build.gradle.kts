@@ -37,4 +37,9 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.datastore.preferences)
+    testImplementation(libs.junit)
+    testImplementation(libs.truth)
+    testImplementation("androidx.datastore:datastore-preferences-core:1.1.7")
+    // runTest/TestScope for the DataStore JVM tests; version matches coroutines in libs.versions.toml.
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
 }

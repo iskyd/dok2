@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -21,11 +22,14 @@ import kotlinx.coroutines.flow.map
  * @property privacyZoneRadiusM the radius of the privacy zone in metres.
  * @property stripExifOnExport whether photo EXIF GPS data is stripped when exporting. On by
  *   default.
+ * @property activeMapFileName the file name of the active `.pmtiles` region in `filesDir/maps/`;
+ *   null = none.
  */
 data class AppSettings(
     val privacyZoneEnabled: Boolean = false,
     val privacyZoneRadiusM: Float = 500f,
     val stripExifOnExport: Boolean = true,
+    val activeMapFileName: String? = null,
 )
 
 /**
@@ -49,6 +53,8 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
                         prefs[KEY_PRIVACY_ZONE_RADIUS_M] ?: DEFAULT_SETTINGS.privacyZoneRadiusM,
                     stripExifOnExport =
                         prefs[KEY_STRIP_EXIF_ON_EXPORT] ?: DEFAULT_SETTINGS.stripExifOnExport,
+                    activeMapFileName =
+                        prefs[KEY_ACTIVE_MAP_FILE_NAME] ?: DEFAULT_SETTINGS.activeMapFileName,
                 )
             }
 
@@ -67,10 +73,22 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         dataStore.edit { it[KEY_STRIP_EXIF_ON_EXPORT] = strip }
     }
 
+    /**
+     * Sets the active map region file name, or clears it when [name] is null. The key is removed
+     * rather than written as null so a cleared setting is indistinguishable from an unset one.
+     */
+    suspend fun setActiveMapFileName(name: String?) {
+        dataStore.edit { prefs ->
+            if (name == null) prefs.remove(KEY_ACTIVE_MAP_FILE_NAME)
+            else prefs[KEY_ACTIVE_MAP_FILE_NAME] = name
+        }
+    }
+
     private companion object {
         val KEY_PRIVACY_ZONE_ENABLED = booleanPreferencesKey("privacy_zone_enabled")
         val KEY_PRIVACY_ZONE_RADIUS_M = floatPreferencesKey("privacy_zone_radius_m")
         val KEY_STRIP_EXIF_ON_EXPORT = booleanPreferencesKey("strip_exif_on_export")
+        val KEY_ACTIVE_MAP_FILE_NAME = stringPreferencesKey("active_map_file_name")
         val DEFAULT_SETTINGS = AppSettings()
     }
 }
