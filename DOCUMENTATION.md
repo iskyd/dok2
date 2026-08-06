@@ -360,6 +360,12 @@ The Settings Map data section shows the active region's name and size.
 - The seven basemap layers render exactly the source-layer names in `tilemaker/process.lua` (landuse, water, contour, path, track, peak, hut) — renaming one silently blanks the map.
 - The GL surface is destroyed whenever the map is not visible. See [Battery](#battery).
 
+### Map screen behaviour
+
+The Map tab renders the recording session live. The track polyline grows as points are written: `TrackRepository.observePoints` streams them from the Room database via a `Flow` (event-driven, no polling), and the line updates on each write flush — roughly every 10 points, ~30 s of recording; longer while manually paused, when the GNSS trickle runs at 30 s. A blue dot marks the current fix and is hidden when there is no fix. The camera follows the last fix until a gesture (pinch, drag) hands off; the Recenter button (bottom-end, hidden when there is no position or track) flies back to the position at zoom 15 and re-enables follow. Zoom is gestures-only — no on-screen buttons — starting from a default of zoom 15. Position is recording-only: the idle map shows "Start recording to see your track" and requests no GPS.
+
+Follow mode moves the camera at most once per fix (≤ 3 s apart) with ~200 ms animation; the dot adds one small GL layer; the track source updates only on ~30 s flushes. No timers, no steady GL work when hidden. Envelope stays 15–25 %/h (map-screen target).
+
 ---
 
 ## Permissions
