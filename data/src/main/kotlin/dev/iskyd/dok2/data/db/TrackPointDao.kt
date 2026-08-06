@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Transaction
+import kotlinx.coroutines.flow.Flow
 
 /** Data-access for the `trackpoints` table. */
 @Dao
@@ -18,6 +19,13 @@ interface TrackPointDao {
     /** Loads all points of a track in recording order. */
     @Query("SELECT * FROM trackpoints WHERE track_id = :trackId ORDER BY seq")
     suspend fun getByTrack(trackId: Long): List<TrackPointEntity>
+
+    /**
+     * Emits all points of a track in recording order, re-emitting whenever the stored points
+     * change. The live map observes this to grow the polyline while recording.
+     */
+    @Query("SELECT * FROM trackpoints WHERE track_id = :trackId ORDER BY seq")
+    fun observeByTrack(trackId: Long): Flow<List<TrackPointEntity>>
 
     /**
      * The highest `seq` stored for a track, or -1 when the track has no points yet. The caller uses

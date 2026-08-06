@@ -186,6 +186,14 @@ class TrackRepository(
     suspend fun getPoints(trackId: Long): List<TrackPoint> =
         trackPointDao.getByTrack(trackId).map { it.toDomain() }
 
+    /**
+     * Emits all points of a track in recording order, converted to decimal degrees, re-emitting
+     * whenever the stored points change. The live map observes this to grow the polyline while
+     * recording.
+     */
+    fun observePoints(trackId: Long): Flow<List<TrackPoint>> =
+        trackPointDao.observeByTrack(trackId).map { points -> points.map { it.toDomain() } }
+
     /** Loads the pause/resume transitions of a track in chronological order. */
     suspend fun getPauseEvents(trackId: Long): List<Pair<Long, PointState>> =
         pauseEventDao.getByTrack(trackId).map { it.tMs to pointStateFromCode(it.newState) }
