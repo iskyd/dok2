@@ -29,10 +29,13 @@ import dev.iskyd.dok2.data.repo.TrackRepository
 import dev.iskyd.dok2.domain.model.TrackPoint
 import dev.iskyd.dok2.recording.RecordingStateHolder
 import java.io.File
+import kotlinx.coroutines.flow.flowOf
 import org.maplibre.android.MapLibre
+import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapLibreMap.OnCameraMoveStartedListener
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
@@ -73,10 +76,22 @@ fun MapScreen(
     val lastLatLng by RecordingStateHolder.lastLatLng.collectAsState()
     val settings by settingsRepository.settingsFlow.collectAsState(initial = AppSettings())
 
-    var points by remember { mutableStateOf<List<TrackPoint>>(emptyList()) }
-    LaunchedEffect(openTrackId) {
-        points = openTrackId?.let { trackRepository.getPoints(it) } ?: emptyList()
-    }
+    // Live points from the open track, re-keyed to the track id so a new session re-queries and
+    // the DAO Flow re-emits as points are written (event-driven, no polling). Null id -> idle map.
+    val points by
+        remember(openTrackId) {
+                openTrackId?.let { trackRepository.observePoints(it) }
+                    ?: flowOf<List<TrackPoint>>(emptyList())
+            }
+            .collectAsState(initial = emptyList())
+
+    // Skips the track setGeoJson rebuild on recompositions that only carry a new fix (lastLatLng).
+    var lastPoints by remember { mutableStateOf<List<TrackPoint>?>(null) }
+
+    // Follow-mode camera (plan D1-D3). didInitialJump is per map open: MapScreen is destroyed on
+    // tab switch, so the state below resets with the composition.
+    var following by remember { mutableStateOf(true) }
+    var didInitialJump by remember { mutableStateOf(false) }
 
     // The active region file, re-resolved whenever the configured file name changes. [activeFile]
     // re-checks the file on disk, so a setting pointing at a deleted file reads as "no region".
@@ -151,6 +166,17 @@ fun MapScreen(
                     mapRequested = true
                     mapView.getMapAsync { loaded ->
                         map = loaded
+                        loaded.addOnCameraMoveStartedListener(
+                            OnCameraMoveStartedListener { reason ->
+                                // A gesture ends follow mode; cancel any in-flight follow animation
+                                // so
+                                // the camera cannot re-center after the handoff (plan D2).
+                                if (reason == OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                                    following = false
+                                    loaded.cancelTransitions()
+                                }
+                            }
+                        )
                         loaded.setStyle(Style.Builder().fromUri(STYLE_URL)) { style ->
                             regionFile?.let { file ->
                                 style.addSource(VectorSource(REGION_SOURCE_ID, pmtilesUrl(file)))
@@ -167,12 +193,47 @@ fun MapScreen(
                                 LineLayer(TRACK_LAYER_ID, TRACK_SOURCE_ID)
                                     .withProperties(lineColor(TRACK_COLOR), lineWidth(TRACK_WIDTH))
                             )
+                            // Added after the track layer so the dot draws above the line.
+                            style.addSource(
+                                GeoJsonSource(
+                                    POSITION_SOURCE_ID,
+                                    FeatureCollection.fromFeatures(emptyList()),
+                                )
+                            )
+                            style.addLayer(
+                                CircleLayer(POSITION_LAYER_ID, POSITION_SOURCE_ID)
+                                    .withProperties(
+                                        circleColor(POSITION_COLOR),
+                                        circleRadius(POSITION_RADIUS),
+                                        circleStrokeColor(POSITION_STROKE_COLOR),
+                                        circleStrokeWidth(POSITION_STROKE_WIDTH),
+                                    )
+                            )
                             styleReady = true
                         }
                     }
                 }
                 loadedMap != null && styleReady -> {
-                    syncMap(loadedMap, points, lastLatLng)
+                    lastPoints = syncMap(loadedMap, points, lastPoints)
+                    syncPositionDot(loadedMap, lastLatLng)
+                    // Camera math keys solely off the last fix (plan D1-D3) — never the points
+                    // list.
+                    val target = lastLatLng
+                    if (target != null) {
+                        if (!didInitialJump) {
+                            // First fix after open: jump (no fly) to the position at CAMERA_ZOOM.
+                            loadedMap.setCameraPosition(
+                                CameraPosition.Builder().target(target).zoom(CAMERA_ZOOM).build()
+                            )
+                            didInitialJump = true
+                        } else if (following) {
+                            // Center-only follow preserves the user's zoom.
+                            loadedMap.animateCamera(
+                                CameraUpdateFactory.newLatLng(target),
+                                FOLLOW_ANIMATION_MS,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -199,19 +260,40 @@ fun MapScreen(
     }
 }
 
-private fun syncMap(map: MapLibreMap, points: List<TrackPoint>, lastLatLng: LatLng?) {
-    val source = map.getStyle()?.getSource(TRACK_SOURCE_ID) as? GeoJsonSource ?: return
+// Rebuilds the polyline only when [points] changed since the last applied list, returning the list
+// now applied so the caller can remember it; otherwise every recomposition (each 3 s fix) would
+// rebuild the source.
+private fun syncMap(
+    map: MapLibreMap,
+    points: List<TrackPoint>,
+    lastApplied: List<TrackPoint>?,
+): List<TrackPoint>? {
+    val source = map.getStyle()?.getSource(TRACK_SOURCE_ID) as? GeoJsonSource ?: return lastApplied
+    if (points == lastApplied) return lastApplied
     val coordinates = points.map { Point.fromLngLat(it.lonDeg, it.latDeg) }
     source.setGeoJson(
         FeatureCollection.fromFeatures(
             listOf(Feature.fromGeometry(LineString.fromLngLats(coordinates)))
         )
     )
-    val target =
-        lastLatLng ?: coordinates.lastOrNull()?.let { LatLng(it.latitude(), it.longitude()) }
-    if (target != null) {
-        map.animateCamera(CameraUpdateFactory.newLatLngZoom(target, CAMERA_ZOOM))
-    }
+    return points
+}
+
+private fun syncPositionDot(map: MapLibreMap, lastLatLng: LatLng?) {
+    val source = map.getStyle()?.getSource(POSITION_SOURCE_ID) as? GeoJsonSource ?: return
+    source.setGeoJson(
+        if (lastLatLng != null) {
+            FeatureCollection.fromFeatures(
+                listOf(
+                    Feature.fromGeometry(
+                        Point.fromLngLat(lastLatLng.longitude, lastLatLng.latitude)
+                    )
+                )
+            )
+        } else {
+            FeatureCollection.fromFeatures(emptyList())
+        }
+    )
 }
 
 private fun pmtilesUrl(file: File): String = "pmtiles://file://" + file.absolutePath
@@ -269,6 +351,13 @@ private const val TRACK_LAYER_ID = "track-layer"
 private const val TRACK_COLOR = "#2E7D32"
 private const val TRACK_WIDTH = 4f
 private const val CAMERA_ZOOM = 15.0
+private const val FOLLOW_ANIMATION_MS = 200
+private const val POSITION_SOURCE_ID = "position-source"
+private const val POSITION_LAYER_ID = "position-layer"
+private const val POSITION_COLOR = "#FF2A6D"
+private const val POSITION_RADIUS = 5f
+private const val POSITION_STROKE_COLOR = "#FFFFFF"
+private const val POSITION_STROKE_WIDTH = 2f
 
 private const val REGION_SOURCE_ID = "region-source"
 private const val LANDUSE_LAYER_ID = "landuse-fill"
