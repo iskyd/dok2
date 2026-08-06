@@ -3,6 +3,7 @@ package dev.iskyd.dok2.ui
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -257,6 +258,32 @@ fun MapScreen(
                 )
             }
         }
+        // Recenter button (plan Todo 5): returns to position at CAMERA_ZOOM and re-enables follow.
+        // Hidden when there is nowhere to return to — idle map or fresh session with no fix (D6).
+        if (lastLatLng != null || points.isNotEmpty()) {
+            Surface(
+                onClick = {
+                    // The user explicitly asked to return to position, so this bypasses the
+                    // gesture-handoff and initial-jump guards. animateCamera reports
+                    // REASON_API_ANIMATION, not REASON_API_GESTURE, so follow stays on.
+                    following = true
+                    val target = lastLatLng ?: lastPointOf(points)
+                    if (target != null) {
+                        map?.animateCamera(CameraUpdateFactory.newLatLngZoom(target, CAMERA_ZOOM))
+                    }
+                },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 2.dp,
+            ) {
+                Text(
+                    text = "◎",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
+        }
     }
 }
 
@@ -278,6 +305,10 @@ private fun syncMap(
     )
     return points
 }
+
+// Camera target for the recenter button when there is no live fix: the track's last stored point.
+private fun lastPointOf(points: List<TrackPoint>): LatLng? =
+    points.lastOrNull()?.let { LatLng(it.latDeg, it.lonDeg) }
 
 private fun syncPositionDot(map: MapLibreMap, lastLatLng: LatLng?) {
     val source = map.getStyle()?.getSource(POSITION_SOURCE_ID) as? GeoJsonSource ?: return
