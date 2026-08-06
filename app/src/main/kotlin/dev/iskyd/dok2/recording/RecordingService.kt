@@ -29,6 +29,7 @@ import dev.iskyd.dok2.data.CoordinateCodec
 import dev.iskyd.dok2.data.db.WaypointEntity
 import dev.iskyd.dok2.data.repo.TrackRepository
 import dev.iskyd.dok2.domain.elevation.Barometer
+import dev.iskyd.dok2.domain.elevation.ElevationRateGate
 import dev.iskyd.dok2.domain.elevation.ElevationStats
 import dev.iskyd.dok2.domain.filter.FilterChain
 import dev.iskyd.dok2.domain.filter.FilterResult
@@ -81,6 +82,13 @@ class RecordingService : Service() {
 
     private val elevationStats = ElevationStats()
 
+    /**
+     * Clamps each fix's altitude step to a physically plausible vertical speed before it reaches
+     * [elevationStats]; single-fix artifacts are bounded below the hysteresis and cannot book gain.
+     * Bounds come from the elevation settings and are applied live by the collector in [onCreate].
+     */
+    private lateinit var elevationRateGate: ElevationRateGate
+
     /** Points awaiting a batched [TrackRepository.appendPoints] write (10 points / ~30 s). */
     private val pointBuffer = mutableListOf<TrackPoint>()
 
@@ -127,6 +135,19 @@ class RecordingService : Service() {
         pressureSensor = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE)
         RecordingNotifications.ensureChannel(this)
         stateMachine.addListener(::onStateTransition)
+        elevationRateGate = ElevationRateGate()
+        // The gate follows the elevation bounds from Settings; applying a change live is safe
+        // because the anchor is untouched, only subsequent steps are clamped differently.
+        serviceScope.launch {
+            app.settingsRepository.settingsFlow.collect { settings ->
+                elevationRateGate.configure(
+                    ElevationRateGate.Config(
+                        ascentMaxMps = settings.elevationAscentMaxMps.toDouble(),
+                        descentMaxMps = settings.elevationDescentMaxMps.toDouble(),
+                    )
+                )
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -276,6 +297,7 @@ class RecordingService : Service() {
         filterChain.reset()
         barometer.reset()
         elevationStats.reset()
+        elevationRateGate.reset()
         pointBuffer.clear()
         latestBarometerPressure = null
         wasBarometerCalibrated = false
@@ -425,11 +447,16 @@ class RecordingService : Service() {
         // When GNSS calibration completes, the baseline snaps and the next sample would record a
         // phantom step of the jump size; reseeding re-anchors the reference first.
         if (barometer.calibrated && !wasBarometerCalibrated) {
-            barometer.currentBarometricAltitudeM?.let { elevationStats.reseed(it) }
+            barometer.currentBarometricAltitudeM?.let {
+                elevationRateGate.reseed(fix.tMs, it)
+                elevationStats.reseed(it)
+            }
         }
         wasBarometerCalibrated = barometer.calibrated
         if (stateMachine.state == RecordingState.Recording) {
-            barometer.currentBarometricAltitudeM?.let { elevationStats.add(it) }
+            barometer.currentBarometricAltitudeM?.let {
+                elevationStats.add(elevationRateGate.accept(fix.tMs, it))
+            }
         }
 
         stateMachine.autoPauseTimeout(fix.tMs)

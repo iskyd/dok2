@@ -47,8 +47,9 @@ class BarometerReplayTest {
     }
 
     /** Mirrors the barometer feed in RecordingService.handleFix. */
-    private class Feed(private val barometer: Barometer) {
+    private class Feed(private val barometer: Barometer, private val withGate: Boolean = true) {
         private val stats = ElevationStats()
+        private val gate = ElevationRateGate()
         private var wasCalibrated = false
 
         val gainM: Double
@@ -61,11 +62,16 @@ class BarometerReplayTest {
             barometer.onPressure(sample.tMs, sample.pressureHpa)
             barometer.onGnssAltitude(sample.tMs, sample.altGnssM, sample.accuracyM)
             if (barometer.calibrated && !wasCalibrated) {
-                barometer.currentBarometricAltitudeM?.let { stats.reseed(it) }
+                barometer.currentBarometricAltitudeM?.let {
+                    gate.reseed(sample.tMs, it)
+                    stats.reseed(it)
+                }
             }
             wasCalibrated = barometer.calibrated
             if (sample.state == 0) {
-                barometer.currentBarometricAltitudeM?.let { stats.add(it) }
+                barometer.currentBarometricAltitudeM?.let {
+                    stats.add(if (withGate) gate.accept(sample.tMs, it) else it)
+                }
             }
         }
     }
@@ -85,12 +91,31 @@ class BarometerReplayTest {
 
     @Test
     fun `single sample feed reproduces the phantom gain the fix removes`() {
-        // medianWindowSize = 1 disables smoothing: the regression signature of the old bug.
-        val feed = Feed(Barometer(Barometer.Config(medianWindowSize = 1)))
+        // medianWindowSize = 1 disables smoothing: the regression signature of the old bug. The
+        // rate gate is bypassed so this test isolates the median's contribution.
+        val feed = Feed(Barometer(Barometer.Config(medianWindowSize = 1)), withGate = false)
         for (sample in loadSamples()) feed.onFix(sample)
         println("RAW feed: gain=${"%.1f".format(feed.gainM)} loss=${"%.1f".format(feed.lossM)}")
         assertThat(feed.gainM).isGreaterThan(1_000.0)
         assertThat(feed.lossM).isGreaterThan(1_000.0)
+    }
+
+    @Test
+    fun `rate gate tames the phantom gain of a raw single sample feed`() {
+        val rawFeed = Feed(Barometer(Barometer.Config(medianWindowSize = 1)), withGate = false)
+        val gatedFeed = Feed(Barometer(Barometer.Config(medianWindowSize = 1)), withGate = true)
+        for (sample in loadSamples()) {
+            rawFeed.onFix(sample)
+            gatedFeed.onFix(sample)
+        }
+        println(
+            "RAW+GATE pipeline: gain=${"%.1f".format(gatedFeed.gainM)} " +
+                "loss=${"%.1f".format(gatedFeed.lossM)}"
+        )
+        assertThat(gatedFeed.gainM).isLessThan(rawFeed.gainM / 2.0)
+        assertThat(gatedFeed.lossM).isLessThan(rawFeed.lossM / 2.0)
+        assertThat(gatedFeed.gainM).isGreaterThan(50.0)
+        assertThat(gatedFeed.lossM).isGreaterThan(80.0)
     }
 
     @Test

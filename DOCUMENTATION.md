@@ -211,6 +211,15 @@ The clamp is what makes this safe: one bad GNSS altitude cannot yank the baselin
 
 **Smoothing.** Instantaneous barometer samples are noisy: a footstep, a gust of wind across the sensor port, or the phone bouncing in a pocket produces pressure spikes of 1–2 hPa (≈8–16 m) that last a fraction of a second. The altitude is computed from the median of the last 10 samples (~2 s at the 5 Hz rate), never from a single sample. A spike occupies at most a few window slots and cannot move the median; the raw samples are still what gets stored in `trackpoints.pressure_hpa`. Without this, spikes regularly exceed the 5 m hysteresis below and the accumulator records hundreds of metres of phantom gain on a flat walk.
 
+**Rate gate.** The median kills sub-second spikes, but an event lasting ≥1.2 s (a gust, a blocked sensor port) still moves the medianed altitude. A hiker cannot move vertically faster than a few m/s, so each fix's altitude step is clamped before it reaches the hysteresis accumulator:
+
+```
+maxDelta = maxRate × dt        // dt = seconds since the last accepted sample
+fed      = lastAccepted + clamp(alt − lastAccepted, ±maxDelta)
+```
+
+Bounds are asymmetric: **ascent 1.5 m/s, descent 2.5 m/s** — the app defaults, adjustable in Settings → Elevation bounds (sliders, 0.5–3.0 m/s in 0.1 steps). The ascent bound sits below the hysteresis (1.5 × 3 s = 4.5 m < 5 m), so a single-fix artifact can never book gain — the gate stops the step and the hysteresis swallows the remainder. The descent bound is looser because genuine downhill running exceeds 1.5 m/s in bursts; the cost is that descent artifacts above the hysteresis can book phantom loss, which the DEM pass recomputes exactly. The gate bounds *speed*, not distance: a dropped fix or a pause relaxes `maxDelta` with `dt`, so a slow-but-large real movement across a gap is not clamped. Raw stored data is untouched; only the statistics feed is gated.
+
 **Hysteresis.** Gain and loss accumulate only after a sustained 5 m move in one direction:
 
 ```

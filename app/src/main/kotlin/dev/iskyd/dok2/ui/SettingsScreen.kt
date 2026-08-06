@@ -46,9 +46,10 @@ import dev.iskyd.dok2.data.prefs.SettingsRepository
 import kotlinx.coroutines.launch
 
 /**
- * The settings screen: privacy-zone and export-EXIF preferences from [SettingsRepository], the
- * map-data section ([MapRegionRepository]), plus the battery-optimization request and a link to the
- * OEM background-killer guide (no INTERNET permission needed — the link opens an external browser).
+ * The settings screen: privacy-zone, export-EXIF and elevation-bound preferences from
+ * [SettingsRepository], the map-data section ([MapRegionRepository]), plus the battery-optimization
+ * request and a link to the OEM background-killer guide (no INTERNET permission needed — the link
+ * opens an external browser).
  */
 @Composable
 fun SettingsScreen(
@@ -118,6 +119,12 @@ fun SettingsScreen(
             )
         }
 
+        ElevationBoundsSection(
+            ascentMaxMps = settings.elevationAscentMaxMps,
+            descentMaxMps = settings.elevationDescentMaxMps,
+            settingsRepository = settingsRepository,
+        )
+
         MapDataSection(
             activeMapFileName = settings.activeMapFileName,
             mapRegionRepository = mapRegionRepository,
@@ -133,6 +140,68 @@ fun SettingsScreen(
         OutlinedButton(onClick = { openUrl(context, OEM_KILLER_URL) }) {
             Text("OEM background-killer instructions")
         }
+    }
+}
+
+/**
+ * The elevation-bound section of the settings screen: two sliders for the rate gate's ascent and
+ * descent limits in m/s, persisted on release (the privacy-zone slider pattern). The gate clamps
+ * each fix's altitude step to `bound × 3 s` before gain/loss is accumulated; values above ~1.7 m/s
+ * ascent let single-fix spikes exceed the 5 m hysteresis and book phantom gain, so the UI warns
+ * about the trade-off instead of hiding it.
+ */
+@Composable
+private fun ElevationBoundsSection(
+    ascentMaxMps: Float,
+    descentMaxMps: Float,
+    settingsRepository: SettingsRepository,
+) {
+    val scope = rememberCoroutineScope()
+    var ascentMps by remember { mutableFloatStateOf(ascentMaxMps) }
+    var descentMps by remember { mutableFloatStateOf(descentMaxMps) }
+
+    LaunchedEffect(ascentMaxMps) { ascentMps = ascentMaxMps }
+    LaunchedEffect(descentMaxMps) { descentMps = descentMaxMps }
+
+    Column(Modifier.fillMaxWidth()) {
+        Text("Elevation bounds", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Max vertical speed (m/s) treated as real; faster altitude steps are clamped " +
+                "as sensor spikes before gain/loss is booked.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Ascent: ${"%.1f".format(ascentMps)} m/s",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Slider(
+            value = ascentMps,
+            onValueChange = { ascentMps = it },
+            onValueChangeFinished = {
+                scope.launch { settingsRepository.setElevationAscentMaxMps(ascentMps) }
+            },
+            valueRange = ELEVATION_BOUND_MIN_MPS..ELEVATION_BOUND_MAX_MPS,
+            steps = ELEVATION_BOUND_STEPS,
+        )
+        Text(
+            text = "Descent: ${"%.1f".format(descentMps)} m/s",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Slider(
+            value = descentMps,
+            onValueChange = { descentMps = it },
+            onValueChangeFinished = {
+                scope.launch { settingsRepository.setElevationDescentMaxMps(descentMps) }
+            },
+            valueRange = ELEVATION_BOUND_MIN_MPS..ELEVATION_BOUND_MAX_MPS,
+            steps = ELEVATION_BOUND_STEPS,
+        )
+        Text(
+            "Above 1.7 m/s ascent, single-fix spikes can book phantom gain.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 
@@ -257,3 +326,6 @@ private const val TAG = "SettingsScreen"
 private const val OEM_KILLER_URL = "https://dontkillmyapp.com"
 private const val PRIVACY_ZONE_RADIUS_MIN_M = 100f
 private const val PRIVACY_ZONE_RADIUS_MAX_M = 2000f
+private const val ELEVATION_BOUND_MIN_MPS = 0.5f
+private const val ELEVATION_BOUND_MAX_MPS = 3.0f
+private const val ELEVATION_BOUND_STEPS = 24

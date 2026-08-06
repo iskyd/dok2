@@ -22,6 +22,10 @@ import kotlinx.coroutines.flow.map
  * @property privacyZoneRadiusM the radius of the privacy zone in metres.
  * @property stripExifOnExport whether photo EXIF GPS data is stripped when exporting. On by
  *   default.
+ * @property elevationAscentMaxMps the fastest plausible sustained climb, in m/s. Altitude steps
+ *   faster than this are clamped before gain/loss is accumulated.
+ * @property elevationDescentMaxMps the fastest plausible sustained descent, in m/s. Looser than the
+ *   ascent bound because downhill running is genuinely faster.
  * @property activeMapFileName the file name of the active `.pmtiles` region in `filesDir/maps/`;
  *   null = none.
  */
@@ -29,6 +33,8 @@ data class AppSettings(
     val privacyZoneEnabled: Boolean = false,
     val privacyZoneRadiusM: Float = 500f,
     val stripExifOnExport: Boolean = true,
+    val elevationAscentMaxMps: Float = 1.5f,
+    val elevationDescentMaxMps: Float = 2.5f,
     val activeMapFileName: String? = null,
 )
 
@@ -53,6 +59,12 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
                         prefs[KEY_PRIVACY_ZONE_RADIUS_M] ?: DEFAULT_SETTINGS.privacyZoneRadiusM,
                     stripExifOnExport =
                         prefs[KEY_STRIP_EXIF_ON_EXPORT] ?: DEFAULT_SETTINGS.stripExifOnExport,
+                    elevationAscentMaxMps =
+                        prefs[KEY_ELEVATION_ASCENT_MAX_MPS]
+                            ?: DEFAULT_SETTINGS.elevationAscentMaxMps,
+                    elevationDescentMaxMps =
+                        prefs[KEY_ELEVATION_DESCENT_MAX_MPS]
+                            ?: DEFAULT_SETTINGS.elevationDescentMaxMps,
                     activeMapFileName =
                         prefs[KEY_ACTIVE_MAP_FILE_NAME] ?: DEFAULT_SETTINGS.activeMapFileName,
                 )
@@ -73,6 +85,16 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         dataStore.edit { it[KEY_STRIP_EXIF_ON_EXPORT] = strip }
     }
 
+    /** Sets the fastest plausible sustained climb, in m/s. */
+    suspend fun setElevationAscentMaxMps(mps: Float) {
+        dataStore.edit { it[KEY_ELEVATION_ASCENT_MAX_MPS] = mps }
+    }
+
+    /** Sets the fastest plausible sustained descent, in m/s. */
+    suspend fun setElevationDescentMaxMps(mps: Float) {
+        dataStore.edit { it[KEY_ELEVATION_DESCENT_MAX_MPS] = mps }
+    }
+
     /**
      * Sets the active map region file name, or clears it when [name] is null. The key is removed
      * rather than written as null so a cleared setting is indistinguishable from an unset one.
@@ -88,6 +110,8 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         val KEY_PRIVACY_ZONE_ENABLED = booleanPreferencesKey("privacy_zone_enabled")
         val KEY_PRIVACY_ZONE_RADIUS_M = floatPreferencesKey("privacy_zone_radius_m")
         val KEY_STRIP_EXIF_ON_EXPORT = booleanPreferencesKey("strip_exif_on_export")
+        val KEY_ELEVATION_ASCENT_MAX_MPS = floatPreferencesKey("elevation_ascent_max_mps")
+        val KEY_ELEVATION_DESCENT_MAX_MPS = floatPreferencesKey("elevation_descent_max_mps")
         val KEY_ACTIVE_MAP_FILE_NAME = stringPreferencesKey("active_map_file_name")
         val DEFAULT_SETTINGS = AppSettings()
     }

@@ -30,6 +30,19 @@ class SettingsRepositoryTest {
         assertThat(settings.privacyZoneEnabled).isFalse()
         assertThat(settings.privacyZoneRadiusM).isEqualTo(500f)
         assertThat(settings.stripExifOnExport).isTrue()
+        assertThat(settings.elevationAscentMaxMps).isEqualTo(1.5f)
+        assertThat(settings.elevationDescentMaxMps).isEqualTo(2.5f)
+    }
+
+    @Test
+    fun `elevation bounds are read back after being set`() = runTest {
+        val repository = SettingsRepository(createDataStore())
+
+        repository.setElevationAscentMaxMps(2.0f)
+        repository.setElevationDescentMaxMps(3.5f)
+
+        assertThat(repository.settingsFlow.first().elevationAscentMaxMps).isEqualTo(2.0f)
+        assertThat(repository.settingsFlow.first().elevationDescentMaxMps).isEqualTo(3.5f)
     }
 
     @Test
