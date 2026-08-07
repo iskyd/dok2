@@ -16,10 +16,12 @@ import kotlin.math.pow
  * regularly exceed the 5 m hysteresis and the accumulator books hundreds of metres of phantom gain
  * on a flat walk.
  *
- * **Calibration.** For the first 60 seconds after [start], good GNSS altitudes (accuracy better
- * than 15 m) and the concurrent pressure samples are collected. When the window closes, the medians
- * are used to solve for `p0` so the barometric altitude matches the GNSS altitude. If no usable
- * GNSS altitude arrives, `p0` stays at the fallback of 1013.25 hPa and [calibrated] is false.
+ * **Calibration.** After [start], good GNSS altitudes (accuracy better than 15 m) and the
+ * concurrent pressure samples are collected. As soon as [Config.earlyCalibrationMinFixes] good
+ * altitudes have accumulated — a strong fix must not make the user wait — or the
+ * [Config.calibrationWindowMs] window closes, whichever comes first, the medians are used to solve
+ * for `p0` so the barometric altitude matches the GNSS altitude. If no usable GNSS altitude
+ * arrives, `p0` stays at the fallback of 1013.25 hPa and [calibrated] is false.
  *
  * **Drift correction.** Weather shifts the baseline by 50–100 m over a day. Every 5 minutes, `p0`
  * is nudged toward the median of recent good GNSS altitudes:
@@ -39,7 +41,12 @@ class Barometer(private val config: Config = Config.DEFAULT) {
     /**
      * Tuning constants for calibration, smoothing and drift correction.
      *
-     * @property calibrationWindowMs how long the initial GNSS altitude collection lasts.
+     * @property calibrationWindowMs the backstop for the initial GNSS altitude collection; the
+     *   calibration ends as soon as [earlyCalibrationMinFixes] good fixes arrive, or when this
+     *   window closes, whichever comes first.
+     * @property earlyCalibrationMinFixes how many good GNSS altitudes solve the baseline early, so
+     *   a strong signal does not make the user wait out the whole window. The median still guards
+     *   against outliers; the window backstop covers a weak signal that never accumulates enough.
      * @property goodAccuracyMaxM altitudes with accuracy better than this are "good".
      * @property fallbackSeaLevelHpa used when no usable GNSS altitude arrives.
      * @property driftIntervalMs how often the baseline is corrected.
@@ -53,6 +60,7 @@ class Barometer(private val config: Config = Config.DEFAULT) {
      */
     data class Config(
         val calibrationWindowMs: Long = 60_000L,
+        val earlyCalibrationMinFixes: Int = 8,
         val goodAccuracyMaxM: Double = 15.0,
         val fallbackSeaLevelHpa: Double = 1013.25,
         val driftIntervalMs: Long = 300_000L,
@@ -127,12 +135,18 @@ class Barometer(private val config: Config = Config.DEFAULT) {
     fun onGnssAltitude(tMs: Long, altGnssM: Double, accuracyM: Double) {
         if (!started) start(tMs)
         if (accuracyM >= config.goodAccuracyMaxM) return
-        if (!calibratedValue && tMs < startTMs + config.calibrationWindowMs) {
-            calibrationGnssAlts += altGnssM
-            return
-        }
         if (!calibratedValue) {
-            calibrate()
+            // Collect only inside the window so a never-calibrating run (all fixes bad) cannot
+            // grow the list unbounded; the window is the backstop, the fix count the fast path.
+            val windowClosed = tMs >= startTMs + config.calibrationWindowMs
+            if (windowClosed) {
+                calibrate()
+                return
+            }
+            calibrationGnssAlts += altGnssM
+            if (calibrationGnssAlts.size >= config.earlyCalibrationMinFixes) {
+                calibrate()
+            }
             return
         }
         driftAlts.addLast(altGnssM)

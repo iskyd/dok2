@@ -64,6 +64,63 @@ class BarometerTest {
     }
 
     @Test
+    fun `enough good gnss fixes calibrate before the window closes`() {
+        val barometer = Barometer()
+        barometer.start(0)
+        barometer.onPressure(2_000, 1012.0)
+        // The default early threshold is 8 fixes: the 8th good fix (t = 22 s, inside the 60 s
+        // window) solves the baseline; no post-window sample is needed.
+        for (i in 0L..7L) {
+            barometer.onGnssAltitude(1_000 + i * 3_000, 100.0, 5.0)
+        }
+
+        assertThat(barometer.calibrated).isTrue()
+        // p0 for median altitude 100.0 m at 1012.0 hPa.
+        assertThat(barometer.seaLevelHpa).isWithin(0.01).of(1024.0816)
+    }
+
+    @Test
+    fun `fewer than the early threshold good fixes wait for the window backstop`() {
+        val barometer = Barometer()
+        barometer.start(0)
+        barometer.onPressure(2_000, 1012.0)
+        // Four good fixes are below the 8-fix threshold: still uncalibrated inside the window.
+        for (i in 0L..3L) {
+            barometer.onGnssAltitude(1_000 + i * 3_000, 100.0, 5.0)
+        }
+        assertThat(barometer.calibrated).isFalse()
+        // The first good fix after the 60 s window closes triggers calibration.
+        barometer.onGnssAltitude(63_000, 100.4, 5.0)
+        assertThat(barometer.calibrated).isTrue()
+    }
+
+    @Test
+    fun `bad accuracy fixes do not count toward the early threshold`() {
+        val barometer = Barometer()
+        barometer.start(0)
+        barometer.onPressure(2_000, 1012.0)
+        // Eight fixes, but the last one is worse than 15 m: only 7 count, so no early exit.
+        for (i in 0L..7L) {
+            barometer.onGnssAltitude(1_000 + i * 3_000, 100.0, if (i == 7L) 20.0 else 5.0)
+        }
+        assertThat(barometer.calibrated).isFalse()
+        barometer.onGnssAltitude(25_000, 100.0, 5.0)
+        assertThat(barometer.calibrated).isTrue()
+    }
+
+    @Test
+    fun `early threshold is configurable`() {
+        val barometer = Barometer(Barometer.Config(earlyCalibrationMinFixes = 3))
+        barometer.start(0)
+        barometer.onPressure(2_000, 1012.0)
+        barometer.onGnssAltitude(1_000, 100.0, 5.0)
+        barometer.onGnssAltitude(4_000, 100.0, 5.0)
+        assertThat(barometer.calibrated).isFalse()
+        barometer.onGnssAltitude(7_000, 100.0, 5.0)
+        assertThat(barometer.calibrated).isTrue()
+    }
+
+    @Test
     fun `drift correction nudges p0 toward the gnss median`() {
         val barometer = calibrateAround100Metres()
 

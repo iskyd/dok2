@@ -119,6 +119,27 @@ class BarometerReplayTest {
     }
 
     @Test
+    fun `early calibration solves the baseline well before the window on the real hike`() {
+        val samples = loadSamples()
+        val start = samples.first().tMs
+        val barometer = Barometer()
+        var calibratedAtMs = -1L
+        for (sample in samples) {
+            barometer.onPressure(sample.tMs, sample.pressureHpa)
+            barometer.onGnssAltitude(sample.tMs, sample.altGnssM, sample.accuracyM)
+            if (barometer.calibrated) {
+                calibratedAtMs = sample.tMs
+                break
+            }
+        }
+        // The 8-fix early threshold fires ~24 s in on this fixture (3 s fix cadence); the window
+        // backstop would take ~63 s. Lock the early exit against regressions.
+        assertThat(calibratedAtMs - start).isGreaterThan(0L)
+        assertThat(calibratedAtMs - start).isLessThan(45_000L)
+        assertThat(barometer.calibrated).isTrue()
+    }
+
+    @Test
     fun `gnss truth on the real hike is roughly a hundred metres`() {
         val stats = ElevationStats()
         for (sample in loadSamples()) stats.add(sample.altGnssM)

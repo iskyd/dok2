@@ -379,7 +379,8 @@ private fun removeBasemapLayers(style: Style) {
 private const val STYLE_URL = "asset://style.json"
 private const val TRACK_SOURCE_ID = "track-source"
 private const val TRACK_LAYER_ID = "track-layer"
-// Warm orange: the old green route vanished against the green landuse/paths/tracks in the region style.
+// Warm orange: the old green route vanished against the green landuse/paths/tracks in the region
+// style.
 private const val TRACK_COLOR = "#F4511E"
 private const val TRACK_WIDTH = 4f
 private const val CAMERA_ZOOM = 15.0
