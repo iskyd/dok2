@@ -35,6 +35,7 @@ import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapLibreMap.OnCameraMoveStartedListener
 import org.maplibre.android.maps.MapView
@@ -63,13 +64,16 @@ import org.maplibre.geojson.Point
  * The track map. The MapLibre GL surface exists only while this screen is composed: [MapView] is
  * created here, forwarded every activity lifecycle event, and destroyed in `onDispose` — the app's
  * number-one battery rule. It renders the open track's points as a polyline and camera-follows the
- * last fix; the location engine stays in [dev.iskyd.dok2.recording.RecordingService].
+ * last fix; the location engine stays in [dev.iskyd.dok2.recording.RecordingService]. With
+ * [viewTrackId] set (and no live recording) it renders that finished track instead: polyline,
+ * one-shot fit-to-bounds, no position dot or follow.
  */
 @Composable
 fun MapScreen(
     trackRepository: TrackRepository,
     mapRegionRepository: MapRegionRepository,
     settingsRepository: SettingsRepository,
+    viewTrackId: Long? = null,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -77,17 +81,28 @@ fun MapScreen(
     val lastLatLng by RecordingStateHolder.lastLatLng.collectAsState()
     val settings by settingsRepository.settingsFlow.collectAsState(initial = AppSettings())
 
-    // Live points from the open track, re-keyed to the track id so a new session re-queries and
-    // the DAO Flow re-emits as points are written (event-driven, no polling). Null id -> idle map.
+    // Points from the open (live) track or the viewed finished track, re-keyed to both ids so a new
+    // session re-queries and the DAO Flow re-emits as points are written. Live recording wins; the
+    // viewed track renders only when there is no live session. Null ids -> idle map.
     val points by
-        remember(openTrackId) {
-                openTrackId?.let { trackRepository.observePoints(it) }
-                    ?: flowOf<List<TrackPoint>>(emptyList())
+        remember(openTrackId, viewTrackId) {
+                // Capture into locals: openTrackId is a delegated property, which blocks smart
+                // casts on the delegated value itself.
+                val liveId = openTrackId
+                val viewId = viewTrackId
+                when {
+                    liveId != null -> trackRepository.observePoints(liveId)
+                    viewId != null -> trackRepository.observePoints(viewId)
+                    else -> flowOf<List<TrackPoint>>(emptyList())
+                }
             }
             .collectAsState(initial = emptyList())
 
     // Skips the track setGeoJson rebuild on recompositions that only carry a new fix (lastLatLng).
-    var lastPoints by remember { mutableStateOf<List<TrackPoint>?>(null) }
+    // Re-keyed per viewed track so switching viewed tracks forces the rebuild for the new track.
+    var lastPoints by remember(viewTrackId) { mutableStateOf<List<TrackPoint>?>(null) }
+    // One-shot camera fit for the viewed track; re-keyed per track, stays false on layout retry.
+    var didFitView by remember(viewTrackId) { mutableStateOf(false) }
 
     // Follow-mode camera (plan D1-D3). didInitialJump is per map open: MapScreen is destroyed on
     // tab switch, so the state below resets with the composition.
@@ -216,23 +231,67 @@ fun MapScreen(
                 }
                 loadedMap != null && styleReady -> {
                     lastPoints = syncMap(loadedMap, points, lastPoints)
-                    syncPositionDot(loadedMap, lastLatLng)
-                    // Camera math keys solely off the last fix (plan D1-D3) — never the points
-                    // list.
-                    val target = lastLatLng
-                    if (target != null) {
-                        if (!didInitialJump) {
-                            // First fix after open: jump (no fly) to the position at CAMERA_ZOOM.
-                            loadedMap.setCameraPosition(
-                                CameraPosition.Builder().target(target).zoom(CAMERA_ZOOM).build()
-                            )
-                            didInitialJump = true
-                        } else if (following) {
-                            // Center-only follow preserves the user's zoom.
+                    if (openTrackId != null) {
+                        syncPositionDot(loadedMap, lastLatLng)
+                        // Camera math keys solely off the last fix (plan D1-D3) — never the points
+                        // list.
+                        val target = lastLatLng
+                        if (target != null) {
+                            if (!didInitialJump) {
+                                // First fix after open: jump (no fly) to the position at
+                                // CAMERA_ZOOM.
+                                loadedMap.setCameraPosition(
+                                    CameraPosition.Builder()
+                                        .target(target)
+                                        .zoom(CAMERA_ZOOM)
+                                        .build()
+                                )
+                                didInitialJump = true
+                            } else if (following) {
+                                // Center-only follow preserves the user's zoom.
+                                loadedMap.animateCamera(
+                                    CameraUpdateFactory.newLatLng(target),
+                                    FOLLOW_ANIMATION_MS,
+                                )
+                            }
+                        }
+                    } else {
+                        syncPositionDot(loadedMap, null)
+                    }
+                    // View mode: fit the camera to the finished track's bounds once. Guarded
+                    // against a pre-layout mapView (width/height 0) — skip without setting
+                    // didFitView so the next emission retries. Also gated on openTrackId == null
+                    // so an active live recording (whose points win the source flow) can never
+                    // consume the one-shot fit.
+                    if (
+                        openTrackId == null &&
+                            viewTrackId != null &&
+                            !didFitView &&
+                            points.isNotEmpty() &&
+                            mapView.width > 0 &&
+                            mapView.height > 0
+                    ) {
+                        if (points.size >= 2) {
+                            val builder = LatLngBounds.Builder()
+                            points.forEach { builder.include(LatLng(it.latDeg, it.lonDeg)) }
                             loadedMap.animateCamera(
-                                CameraUpdateFactory.newLatLng(target),
-                                FOLLOW_ANIMATION_MS,
+                                CameraUpdateFactory.newLatLngBounds(
+                                    builder.build(),
+                                    mapView.width.toDouble(),
+                                    mapView.height.toDouble(),
+                                    BOUNDS_PADDING_PX,
+                                )
                             )
+                            didFitView = true
+                        } else {
+                            val only = points.first()
+                            loadedMap.setCameraPosition(
+                                CameraPosition.Builder()
+                                    .target(LatLng(only.latDeg, only.lonDeg))
+                                    .zoom(CAMERA_ZOOM)
+                                    .build()
+                            )
+                            didFitView = true
                         }
                     }
                 }
@@ -240,8 +299,9 @@ fun MapScreen(
         }
         val hintText =
             when {
-                openTrackId == null -> "Start recording to see your track"
-                regionFile == null -> "No map data — add a region file in Settings"
+                regionFile == null && (openTrackId != null || viewTrackId != null) ->
+                    "No map data — add a region file in Settings"
+                openTrackId == null && viewTrackId == null -> "Start recording to see your track"
                 else -> null
             }
         if (hintText != null) {
@@ -263,13 +323,30 @@ fun MapScreen(
         if (lastLatLng != null || points.isNotEmpty()) {
             Surface(
                 onClick = {
-                    // The user explicitly asked to return to position, so this bypasses the
-                    // gesture-handoff and initial-jump guards. animateCamera reports
-                    // REASON_API_ANIMATION, not REASON_API_GESTURE, so follow stays on.
-                    following = true
-                    val target = lastLatLng ?: lastPointOf(points)
-                    if (target != null) {
-                        map?.animateCamera(CameraUpdateFactory.newLatLngZoom(target, CAMERA_ZOOM))
+                    if (viewTrackId != null && points.size >= 2) {
+                        // View mode: re-fit to the track bounds; follow must stay off (the viewed
+                        // track has no live position to follow).
+                        val builder = LatLngBounds.Builder()
+                        points.forEach { builder.include(LatLng(it.latDeg, it.lonDeg)) }
+                        map?.animateCamera(
+                            CameraUpdateFactory.newLatLngBounds(
+                                builder.build(),
+                                mapView.width.toDouble(),
+                                mapView.height.toDouble(),
+                                BOUNDS_PADDING_PX,
+                            )
+                        )
+                    } else {
+                        // The user explicitly asked to return to position, so this bypasses the
+                        // gesture-handoff and initial-jump guards. animateCamera reports
+                        // REASON_API_ANIMATION, not REASON_API_GESTURE, so follow stays on.
+                        following = true
+                        val target = lastLatLng ?: lastPointOf(points)
+                        if (target != null) {
+                            map?.animateCamera(
+                                CameraUpdateFactory.newLatLngZoom(target, CAMERA_ZOOM)
+                            )
+                        }
                     }
                 },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
@@ -297,10 +374,15 @@ private fun syncMap(
 ): List<TrackPoint>? {
     val source = map.getStyle()?.getSource(TRACK_SOURCE_ID) as? GeoJsonSource ?: return lastApplied
     if (points == lastApplied) return lastApplied
-    val coordinates = points.map { Point.fromLngLat(it.lonDeg, it.latDeg) }
+    val coordinates =
+        if (points.size >= 2) points.map { Point.fromLngLat(it.lonDeg, it.latDeg) } else emptyList()
     source.setGeoJson(
         FeatureCollection.fromFeatures(
-            listOf(Feature.fromGeometry(LineString.fromLngLats(coordinates)))
+            if (coordinates.isEmpty()) {
+                emptyList()
+            } else {
+                listOf(Feature.fromGeometry(LineString.fromLngLats(coordinates)))
+            }
         )
     )
     return points
@@ -385,6 +467,7 @@ private const val TRACK_COLOR = "#F4511E"
 private const val TRACK_WIDTH = 4f
 private const val CAMERA_ZOOM = 15.0
 private const val FOLLOW_ANIMATION_MS = 200
+private const val BOUNDS_PADDING_PX = 80
 private const val POSITION_SOURCE_ID = "position-source"
 private const val POSITION_LAYER_ID = "position-layer"
 private const val POSITION_COLOR = "#1565C0"

@@ -27,6 +27,8 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -35,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import dev.iskyd.dok2.recording.RecordingStateHolder
 import dev.iskyd.dok2.ui.LibraryScreen
 import dev.iskyd.dok2.ui.LiveScreen
 import dev.iskyd.dok2.ui.MapScreen
@@ -124,13 +127,21 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun MainScaffold(app: Dok2Application) {
     var screen by rememberSaveable { mutableStateOf(AppScreen.LIBRARY) }
+    var viewTrackId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val openTrackId by RecordingStateHolder.openTrackId.collectAsState()
+    // M2: a recording starting must not inherit a stale viewed track.
+    LaunchedEffect(openTrackId) { if (openTrackId != null) viewTrackId = null }
     Scaffold(
         bottomBar = {
             NavigationBar {
                 for (item in AppScreen.entries) {
                     NavigationBarItem(
                         selected = screen == item,
-                        onClick = { screen = item },
+                        onClick = {
+                            // A manual Map-tab tap means live/odometer mode, not a viewed track.
+                            if (item == AppScreen.MAP) viewTrackId = null
+                            screen = item
+                        },
                         icon = { ScreenDot(selected = screen == item) },
                         label = { Text(item.label) },
                     )
@@ -140,13 +151,21 @@ private fun MainScaffold(app: Dok2Application) {
     ) { paddingValues ->
         Box(Modifier.fillMaxSize().padding(paddingValues)) {
             when (screen) {
-                AppScreen.LIBRARY -> LibraryScreen(trackRepository = app.trackRepository)
+                AppScreen.LIBRARY ->
+                    LibraryScreen(
+                        trackRepository = app.trackRepository,
+                        onShowOnMap = { id ->
+                            viewTrackId = id
+                            screen = AppScreen.MAP
+                        },
+                    )
                 AppScreen.LIVE -> LiveScreen(trackRepository = app.trackRepository)
                 AppScreen.MAP ->
                     MapScreen(
                         trackRepository = app.trackRepository,
                         mapRegionRepository = app.mapRegionRepository,
                         settingsRepository = app.settingsRepository,
+                        viewTrackId = viewTrackId,
                     )
                 AppScreen.SETTINGS ->
                     SettingsScreen(

@@ -67,7 +67,7 @@ import kotlinx.coroutines.launch
  * (mitigation 5).
  */
 @Composable
-fun LibraryScreen(trackRepository: TrackRepository) {
+fun LibraryScreen(trackRepository: TrackRepository, onShowOnMap: (Long) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val summaries by trackRepository.observeTrackSummaries().collectAsState(initial = emptyList())
@@ -138,6 +138,7 @@ fun LibraryScreen(trackRepository: TrackRepository) {
                         onOpen = {
                             scope.launch { trackForDetails = trackRepository.getTrack(summary.id) }
                         },
+                        onShowOnMap = { onShowOnMap(summary.id) },
                     )
                 }
             }
@@ -279,6 +280,7 @@ private fun TrackCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onOpen: () -> Unit,
+    onShowOnMap: () -> Unit,
 ) {
     Card(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
         Column {
@@ -326,6 +328,7 @@ private fun TrackCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TextButton(onClick = onEdit) { Text("Edit") }
+                TextButton(onClick = onShowOnMap) { Text("Map") }
                 Spacer(Modifier.weight(1f))
                 if (canDelete) {
                     TextButton(onClick = onDelete) {
