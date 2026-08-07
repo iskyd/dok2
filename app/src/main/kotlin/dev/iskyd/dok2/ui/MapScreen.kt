@@ -379,14 +379,15 @@ private fun removeBasemapLayers(style: Style) {
 private const val STYLE_URL = "asset://style.json"
 private const val TRACK_SOURCE_ID = "track-source"
 private const val TRACK_LAYER_ID = "track-layer"
-private const val TRACK_COLOR = "#2E7D32"
+// Warm orange: the old green route vanished against the green landuse/paths/tracks in the region style.
+private const val TRACK_COLOR = "#F4511E"
 private const val TRACK_WIDTH = 4f
 private const val CAMERA_ZOOM = 15.0
 private const val FOLLOW_ANIMATION_MS = 200
 private const val POSITION_SOURCE_ID = "position-source"
 private const val POSITION_LAYER_ID = "position-layer"
-private const val POSITION_COLOR = "#FF2A6D"
-private const val POSITION_RADIUS = 5f
+private const val POSITION_COLOR = "#1565C0"
+private const val POSITION_RADIUS = 6.5f
 private const val POSITION_STROKE_COLOR = "#FFFFFF"
 private const val POSITION_STROKE_WIDTH = 2f
 
