@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dok2 — an offline GPS track recorder for hiking</title>
+<meta name="description" content="dok2 is an offline GPS track recorder for hiking. Android only. No account, no server, no network permission.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='18 18 72 72'%3E%3Crect x='18' y='18' width='72' height='72' rx='16' fill='%231B4D3E'/%3E%3Cpath d='M30 72 42 48 52 58 66 34 78 44' fill='none' stroke='%23E8F1EC' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Spectral:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#E3E7E2;
+    --paper-2:#EDF0EB;
+    --ink:#151C19;
+    --slate:#41504A;
+    --rock:#77857C;
+    --contour:#BAC4BB;
+    --contour-idx:#93A197;
+    --blaze:#C6172E;
+    --dark-bg:#151C19;
+    --dark-fg:#D9DED8;
+    --dark-mute:#8B998F;
+    --dark-line:#2B3631;
+
+    --display:"Archivo","Helvetica Neue",Arial,sans-serif;
+    --body:"Spectral",Georgia,serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+
+    --gut:clamp(20px,5vw,64px);
+    --maxw:1180px;
+  }
+
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--body);
+    font-size:clamp(16px,1.05vw,18px);
+    line-height:1.62;
+    font-synthesis-weight:none;
+  }
+  ::selection{background:var(--blaze);color:#fff}
+
+  a{color:inherit}
+  :focus-visible{outline:2px solid var(--blaze);outline-offset:3px}
+
+  .wrap{max-width:var(--maxw);margin:0 auto;padding-inline:var(--gut)}
+
+  /* ---------- shared type ---------- */
+  .eyebrow{
+    font-family:var(--mono);
+    font-size:.72rem;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--rock);
+    margin:0;
+  }
+  h1,h2,h3{font-family:var(--display);font-weight:700;letter-spacing:-.02em;line-height:1.06;margin:0}
+  h2{font-size:clamp(1.9rem,4.2vw,3rem)}
+  h3{font-size:1.06rem;letter-spacing:-.01em;line-height:1.25}
+  p{margin:0 0 1em}
+  .lede{font-size:clamp(1.08rem,1.6vw,1.32rem);line-height:1.5;color:var(--slate)}
+
+  /* CAI trail blaze: red / white / red — the marker painted on rocks along Italian paths */
+  .blaze{display:block;width:38px;height:13px;background:var(--blaze);
+    background-image:linear-gradient(to bottom,var(--blaze) 0 34%,#fff 34% 66%,var(--blaze) 66% 100%);
+    border-radius:1px}
+  .blaze--dark{background-image:linear-gradient(to bottom,var(--blaze) 0 34%,var(--dark-fg) 34% 66%,var(--blaze) 66% 100%)}
+
+  /* ---------- hero ---------- */
+  .hero{position:relative;min-height:min(92vh,860px);display:flex;align-items:flex-end;overflow:hidden;
+    border-bottom:1px solid var(--contour-idx)}
+  .hero__map{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .hero__veil{position:absolute;inset:0;
+    background:linear-gradient(105deg,rgba(227,231,226,.94) 0%,rgba(227,231,226,.72) 42%,rgba(227,231,226,.18) 78%);
+    pointer-events:none}
+  .hero__inner{position:relative;width:100%;padding-block:clamp(72px,12vh,132px) clamp(28px,5vh,48px)}
+  .hero__brand{display:flex;align-items:center;gap:15px;margin-bottom:clamp(18px,4vh,34px)}
+  .brandtext{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 14px}
+  .wordmark{font-family:var(--display);font-weight:700;font-size:1.6rem;letter-spacing:-.04em;line-height:1}
+  .tag{font-family:var(--mono);font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;color:var(--blaze)}
+  .hero h1{font-size:clamp(2.35rem,6.4vw,5.1rem);max-width:16ch;letter-spacing:-.035em}
+  .hero .lede{max-width:46ch;margin-top:clamp(18px,2.6vh,26px)}
+  .cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:clamp(24px,4vh,36px)}
+  .btn{display:inline-block;font-family:var(--display);font-weight:600;font-size:.92rem;letter-spacing:.01em;
+    padding:13px 22px;border:1px solid var(--ink);text-decoration:none;transition:background .18s,color .18s,transform .18s}
+  .btn--solid{background:var(--ink);color:var(--paper)}
+  .btn--solid:hover{background:var(--blaze);border-color:var(--blaze);transform:translateY(-1px)}
+  .btn--ghost:hover{background:var(--ink);color:var(--paper);transform:translateY(-1px)}
+  .hero__foot{display:flex;flex-wrap:wrap;gap:8px 26px;margin-top:clamp(36px,7vh,64px);
+    font-family:var(--mono);font-size:.73rem;letter-spacing:.06em;color:var(--slate);
+    border-top:1px solid var(--contour-idx);padding-top:14px}
+  .scalebar{position:absolute;right:var(--gut);bottom:26px;display:none;text-align:right}
+  @media(min-width:900px){.scalebar{display:block}}
+  .scalebar__bar{display:flex;height:7px;width:132px;border:1px solid var(--slate)}
+  .scalebar__bar i{flex:1}
+  .scalebar__bar i:nth-child(odd){background:var(--slate)}
+  .scalebar__lbl{font-family:var(--mono);font-size:.64rem;letter-spacing:.1em;color:var(--slate);
+    display:flex;justify-content:space-between;width:132px;margin-top:4px}
+
+  /* ---------- status ---------- */
+  .status{background:var(--ink);color:var(--paper)}
+  .status .wrap{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;padding-block:15px}
+  .status b{font-family:var(--mono);font-weight:500;font-size:.74rem;letter-spacing:.16em;text-transform:uppercase;color:var(--blaze)}
+  .status span{font-size:.95rem;color:#C9D0C9}
+
+  /* ---------- sections ---------- */
+  .sec{padding-block:clamp(64px,10vh,120px)}
+  .sec--rule{border-top:1px solid var(--contour-idx)}
+  .sec__head{max-width:56ch;margin-bottom:clamp(34px,5vh,58px)}
+  .sec__head .blaze{margin-bottom:18px}
+  .sec__head p{margin-top:16px}
+
+  .split{display:grid;gap:clamp(34px,5vw,72px);grid-template-columns:1fr}
+  @media(min-width:820px){.split{grid-template-columns:1fr 1fr}}
+
+  .listing{list-style:none;margin:0;padding:0}
+  .listing li{padding:15px 0;border-top:1px solid var(--contour-idx)}
+  .listing li:last-child{border-bottom:1px solid var(--contour-idx)}
+  .listing h3{margin-bottom:5px}
+  .listing p{margin:0;font-size:.94rem;color:var(--slate)}
+
+  .nots{list-style:none;margin:0;padding:0;
+    display:flex;flex-wrap:wrap;gap:9px}
+  .nots li{font-family:var(--mono);font-size:.82rem;color:var(--rock);
+    border:1px solid var(--contour-idx);padding:7px 12px;position:relative}
+  .nots li::after{content:"";position:absolute;left:8px;right:8px;top:50%;height:1px;background:var(--rock);opacity:.55}
+  .aside{font-family:var(--body);font-style:italic;font-size:1.02rem;color:var(--slate);
+    border-left:2px solid var(--blaze);padding-left:16px;margin-top:26px;max-width:42ch}
+
+  /* ---------- priorities ---------- */
+  .prio{display:grid;gap:1px;background:var(--contour-idx);border:1px solid var(--contour-idx);grid-template-columns:1fr}
+  @media(min-width:700px){.prio{grid-template-columns:repeat(2,1fr)}}
+  @media(min-width:1020px){.prio{grid-template-columns:repeat(4,1fr)}}
+  .prio > div{background:var(--paper);padding:24px 22px 28px}
+  .prio__n{font-family:var(--mono);font-size:.72rem;letter-spacing:.14em;color:var(--blaze)}
+  .prio h3{margin:12px 0 8px;font-size:1.24rem}
+  .prio p{margin:0;font-size:.92rem;color:var(--slate)}
+  .prio > div:last-child{background:var(--paper-2)}
+
+  /* ---------- dark block ---------- */
+  .dark{background:var(--dark-bg);color:var(--dark-fg)}
+  .dark h2,.dark h3{color:#F0F3EF}
+  .dark .lede{color:var(--dark-mute)}
+  .dark .eyebrow{color:var(--dark-mute)}
+  .mech{display:grid;gap:clamp(30px,4vw,54px);grid-template-columns:1fr}
+  @media(min-width:880px){.mech{grid-template-columns:repeat(2,1fr)}}
+  .mech article{border-top:1px solid var(--dark-line);padding-top:20px}
+  .mech h3{margin-bottom:10px}
+  .mech p{color:var(--dark-mute);font-size:.96rem}
+  .mech__label{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--blaze);margin-bottom:12px}
+
+  .pre{font-family:var(--mono);font-size:.8rem;line-height:1.75;white-space:pre;overflow-x:auto;
+    background:#0F1613;border:1px solid var(--dark-line);padding:18px 20px;color:#BFCBC2;margin:0}
+  .pre--light{background:var(--paper-2);border-color:var(--contour-idx);color:var(--slate)}
+  .pre b{color:#fff;font-weight:500}
+
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:.82rem}
+  table th{text-align:left;font-weight:500;color:var(--dark-mute);letter-spacing:.1em;text-transform:uppercase;
+    font-size:.66rem;padding:0 0 10px;border-bottom:1px solid var(--dark-line)}
+  table td{padding:11px 0;border-bottom:1px solid var(--dark-line);vertical-align:baseline}
+  table td:last-child{text-align:right;white-space:nowrap;color:#EDF1EC}
+  tr.hi td{color:#fff}
+  tr.hi td:first-child{color:var(--blaze)}
+
+  /* ---------- permissions ---------- */
+  .perms{list-style:none;margin:0;padding:0;font-family:var(--mono);font-size:.85rem}
+  .perms li{display:flex;gap:14px;align-items:baseline;padding:11px 0;border-bottom:1px solid var(--contour-idx)}
+  .perms li:first-child{border-top:1px solid var(--contour-idx)}
+  .perms .mark{color:var(--rock);flex:0 0 auto;width:1.4em}
+  .perms .off{color:var(--rock);text-decoration:line-through;text-decoration-color:var(--blaze);text-decoration-thickness:1px}
+  .perms .note{font-family:var(--body);font-style:italic;font-size:.86rem;color:var(--rock);margin-left:auto;text-align:right}
+
+  /* ---------- steps ---------- */
+  .steps{counter-reset:s;list-style:none;margin:0;padding:0}
+  .steps li{counter-increment:s;position:relative;padding:20px 0 20px 56px;border-top:1px solid var(--contour-idx)}
+  .steps li:last-child{border-bottom:1px solid var(--contour-idx)}
+  .steps li::before{content:counter(s,decimal-leading-zero);position:absolute;left:0;top:22px;
+    font-family:var(--mono);font-size:.74rem;letter-spacing:.1em;color:var(--blaze)}
+  .steps h3{margin-bottom:5px}
+  .steps p{margin:0;font-size:.94rem;color:var(--slate)}
+  .steps code{font-family:var(--mono);font-size:.86em;background:var(--paper-2);padding:1px 5px}
+
+  /* ---------- logo ---------- */
+  .mark{display:block;flex:0 0 auto;border-radius:22%}
+  .mark--hero{width:clamp(42px,5vw,54px);height:auto}
+  .mark--foot{width:30px;height:auto}
+
+  /* ---------- footer ---------- */
+  footer{border-top:1px solid var(--contour-idx);padding-block:38px;
+    font-family:var(--mono);font-size:.74rem;letter-spacing:.05em;color:var(--rock)}
+  footer .wrap{display:flex;flex-wrap:wrap;gap:16px 28px;justify-content:space-between;align-items:center}
+  footer .id{display:flex;align-items:center;gap:12px;color:var(--ink)}
+  footer a{text-decoration:none;border-bottom:1px solid var(--contour-idx)}
+  footer a:hover{color:var(--ink);border-color:var(--blaze)}
+
+  /* ---------- motion ---------- */
+  .rise{opacity:0;transform:translateY(16px);transition:opacity .7s ease,transform .7s ease}
+  .rise.in{opacity:1;transform:none}
+  @media(prefers-reduced-motion:reduce){
+    .rise{opacity:1;transform:none;transition:none}
+    .btn{transition:none}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <svg class="hero__map" id="map" viewBox="0 0 1200 780" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <g id="contours" fill="none" stroke-linecap="round"></g>
+    <g id="neat" stroke="var(--contour-idx)" stroke-width="1"></g>
+    <path id="track" fill="none" stroke="var(--blaze)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle id="head" r="5.5" fill="var(--blaze)" opacity="0"/>
+    <circle id="head-halo" r="11" fill="none" stroke="var(--blaze)" stroke-width="1" opacity="0"/>
+  </svg>
+  <div class="hero__veil"></div>
+
+  <div class="hero__inner">
+    <div class="wrap">
+      <div class="hero__brand">
+        <svg class="mark mark--hero" viewBox="18 18 72 72" role="img" aria-label="dok2">
+          <rect x="18" y="18" width="72" height="72" rx="16" fill="#1B4D3E"/>
+          <path d="M30 72 42 48 52 58 66 34 78 44" fill="none" stroke="#E8F1EC"
+                stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="brandtext">
+          <span class="wordmark">dok2</span>
+          <span class="tag">pre-alpha · android</span>
+        </span>
+      </div>
+      <h1>An offline GPS track recorder for hiking.</h1>
+      <p class="lede">It records where you walked and draws it on a map that works with no signal. Everything stays on the phone. No account, no server, no network permission.</p>
+      <div class="cta">
+        <a class="btn btn--solid" href="https://github.com/iskyd/dok2">View on GitHub</a>
+        <a class="btn btn--ghost" href="https://github.com/iskyd/dok2/blob/main/DOCUMENTATION.md">Read the documentation</a>
+      </div>
+      <div class="hero__foot">
+        <span>Android 8.0+</span><span>Kotlin</span><span>MapLibre · PMTiles</span><span>SRTM elevation</span><span>GPX export</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="scalebar" aria-hidden="true">
+    <div class="scalebar__bar"><i></i><i></i><i></i><i></i></div>
+    <div class="scalebar__lbl"><span>0</span><span>500 m</span></div>
+  </div>
+</header>
+
+<div class="status">
+  <div class="wrap">
+    <b>Status</b>
+    <span>Pre-alpha. Nothing works yet — the design is written down, the build has started, and there is nothing to install.</span>
+  </div>
+</div>
+
+<section class="sec">
+  <div class="wrap">
+    <div class="sec__head rise">
+      <span class="blaze" aria-hidden="true"></span>
+      <h2>A recorder, and nothing else</h2>
+      <p class="lede">Most tracking apps are built for runners chasing seconds, then sold to hikers. dok2 starts from the hike.</p>
+    </div>
+
+    <div class="split">
+      <div class="rise">
+        <p class="eyebrow" style="margin-bottom:14px">What it does</p>
+        <ul class="listing">
+          <li>
+            <h3>Records a fix every three seconds</h3>
+            <p>Fixed interval, straight from the GPS chip. Long enough to be cheap, short enough to keep the shape of a switchback.</p>
+          </li>
+          <li>
+            <h3>Shows your position on a map with no signal</h3>
+            <p>Vector tiles read from a single map file you copied onto the phone yourself.</p>
+          </li>
+          <li>
+            <h3>Measures climb twice</h3>
+            <p>The barometer gives you a live figure on the trail. When you stop, the track is recomputed against an on-device elevation model.</p>
+          </li>
+          <li>
+            <h3>Marks a waypoint from the lock screen</h3>
+            <p>A spring or a junction is worth recording. It should never cost you an unlock and four taps.</p>
+          </li>
+          <li>
+            <h3>Exports GPX to a folder you pick</h3>
+            <p>Then it stops. Move the files with Syncthing, a cable, or anything else you already trust.</p>
+          </li>
+        </ul>
+      </div>
+
+      <div class="rise">
+        <p class="eyebrow" style="margin-bottom:14px">What it will never do</p>
+        <ul class="nots">
+          <li>social feed</li><li>live location sharing</li><li>turn-by-turn navigation</li>
+          <li>training plans</li><li>segments</li><li>leaderboards</li><li>route discovery</li>
+          <li>accounts</li><li>analytics</li><li>third-party SDKs</li><li>cloud backup</li>
+        </ul>
+        <p class="aside">The app cannot reach the network. Not by policy — it never asks for the permission, so the phone will not let it.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec sec--rule">
+  <div class="wrap">
+    <div class="sec__head rise">
+      <span class="blaze" aria-hidden="true"></span>
+      <h2>Four priorities, in strict order</h2>
+      <p class="lede">Every argument inside the app is settled by this list. Where two of them conflict, the earlier one wins.</p>
+    </div>
+    <div class="prio rise">
+      <div>
+        <span class="prio__n">01</span>
+        <h3>Battery</h3>
+        <p>A full day of recording should cost a small slice of the battery, and a multi-day trek should survive on a power bank.</p>
+      </div>
+      <div>
+        <span class="prio__n">02</span>
+        <h3>Speed</h3>
+        <p>From cold start to recording in under a second. No spinners anywhere in the app.</p>
+      </div>
+      <div>
+        <span class="prio__n">03</span>
+        <h3>Privacy</h3>
+        <p>No account, no analytics, no third-party code, and no permission to reach the network.</p>
+      </div>
+      <div>
+        <span class="prio__n">04</span>
+        <h3>Accuracy — last</h3>
+        <p>Deliberately. Hiking tolerates metres. That is why there is no Kalman filter, no sensor fusion, and no high-rate sampling.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec dark">
+  <div class="wrap">
+    <div class="sec__head rise">
+      <span class="blaze blaze--dark" aria-hidden="true"></span>
+      <h2>The parts that are easy to get wrong</h2>
+      <p class="lede">Three decisions do most of the work. All three are testable on a laptop, replayed against fixes recorded on real hikes.</p>
+    </div>
+
+    <div class="mech">
+      <article class="rise">
+        <p class="mech__label">Distance</p>
+        <h3>Measure from the anchor, not the last fix</h3>
+        <p>Walking uphill at 2 km/h moves you about 1.7 m in three seconds — under any sensible noise threshold. Compare each fix to the previous one and a whole climb reads as zero.</p>
+        <p>So the odometer keeps an anchor: the last point that actually advanced it. Slow movement accumulates against the anchor and adds up correctly. Standing still adds nothing, which is why a long lunch stop does not invent kilometres.</p>
+        <pre class="pre">threshold = clamp(max(4 m, accuracy), 4 m, 30 m)
+
+distance(anchor, fix) >= threshold
+    <b>accepted</b>    add distance, move anchor
+else
+    <b>stationary</b>  store point, add nothing</pre>
+      </article>
+
+      <article class="rise">
+        <p class="mech__label">Elevation</p>
+        <h3>Barometer on the trail, terrain model at home</h3>
+        <p>Satellite altitude is two to three times worse than position. Add up its wobble across a flat 10 km and the app will congratulate you on several hundred metres of climb you never did.</p>
+        <p>The pressure sensor is steadier, so it carries the live figure — calibrated against satellite altitude before recording starts, nudged gently through the day as the weather moves, and read as a median so a gust or a zipped pocket cannot book a false climb.</p>
+        <p>When you finish, the track is resampled and looked up against elevation data stored on the phone. That number replaces the live one, and it costs no battery — the hike is already over.</p>
+      </article>
+
+      <article class="rise">
+        <p class="mech__label">Battery</p>
+        <h3>The GPS was never the problem</h3>
+        <p>Roughly what each part of the phone draws while you record:</p>
+        <table>
+          <thead><tr><th scope="col">Component</th><th scope="col">Draw</th></tr></thead>
+          <tbody>
+            <tr><td>Screen, 6&Prime;, half brightness</td><td>400–700 mW</td></tr>
+            <tr><td>Map drawing on the GPU</td><td>150–400 mW</td></tr>
+            <tr><td>Cellular radio hunting for a tower</td><td>100–500 mW</td></tr>
+            <tr class="hi"><td>GPS receiver, tracking</td><td>25–50 mW</td></tr>
+            <tr><td>Barometer</td><td>&lt; 1 mW</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:18px">The screen costs about ten times the GPS chip, and a phone searching for signal in a valley can cost more than both. So the app is built to be left in a pocket, and it asks you to turn on airplane mode at the trailhead.</p>
+      </article>
+
+      <article class="rise">
+        <p class="mech__label">Targets</p>
+        <h3>What that should add up to</h3>
+        <table>
+          <thead><tr><th scope="col">Mode</th><th scope="col">Per hour</th></tr></thead>
+          <tbody>
+            <tr class="hi"><td>Recording, screen off, airplane mode</td><td>2–4%</td></tr>
+            <tr><td>Recording, screen off, cellular on</td><td>3–6%</td></tr>
+            <tr><td>Recording, map on screen</td><td>15–25%</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:18px">These are hypotheses until they are measured. The only test that settles it is a six-hour hike with the screen off.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
+    <div class="split">
+      <div class="rise">
+        <span class="blaze" aria-hidden="true" style="margin-bottom:18px"></span>
+        <h2>The missing permission is the feature</h2>
+        <p class="lede" style="margin-top:16px">Privacy claims are cheap. This one is checkable from the phone's own settings screen, without trusting anybody.</p>
+        <p class="aside">Without the internet permission, there is no version of this app — and no update to it — that can send your tracks anywhere.</p>
+      </div>
+      <div class="rise">
+        <ul class="perms">
+          <li><span class="mark">✓</span><span>ACCESS_FINE_LOCATION</span></li>
+          <li><span class="mark">✓</span><span>FOREGROUND_SERVICE_LOCATION</span></li>
+          <li><span class="mark">✓</span><span>POST_NOTIFICATIONS</span></li>
+          <li><span class="mark">✓</span><span>RECEIVE_BOOT_COMPLETED</span></li>
+          <li><span class="mark" style="color:var(--blaze)">✕</span><span class="off">INTERNET</span><span class="note">never requested</span></li>
+          <li><span class="mark" style="color:var(--blaze)">✕</span><span class="off">ACCESS_BACKGROUND_LOCATION</span><span class="note">not needed</span></li>
+          <li><span class="mark" style="color:var(--blaze)">✕</span><span class="off">ACTIVITY_RECOGNITION</span><span class="note">not needed</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec sec--rule">
+  <div class="wrap">
+    <div class="sec__head rise">
+      <span class="blaze" aria-hidden="true"></span>
+      <h2>Bringing your own map</h2>
+      <p class="lede">The app cannot download anything, so you supply the terrain. Once, per region, before you leave the house.</p>
+    </div>
+    <div class="split">
+      <ol class="steps rise">
+        <li>
+          <h3>Download your region</h3>
+          <p>Grab an OpenStreetMap extract for the area you hike in from Geofabrik.</p>
+        </li>
+        <li>
+          <h3>Build a map file</h3>
+          <p>Run it through Tilemaker with the profile in <code>tilemaker/</code>. It keeps paths, tracks, contours, water, peaks and huts, and throws away everything a hiker will never look at.</p>
+        </li>
+        <li>
+          <h3>Copy it across and pick it</h3>
+          <p>Move the file to the phone, then choose it in Settings → Map data. A 100 × 100 km region with contours lands around 150–400 MB.</p>
+        </li>
+      </ol>
+      <div class="rise">
+        <p class="eyebrow" style="margin-bottom:14px">Build from source</p>
+        <pre class="pre pre--light">./gradlew :app:assembleDebug
+./gradlew :app:installDebug
+
+./gradlew :domain:test   # fast, run constantly
+./gradlew check          # lint + everything</pre>
+        <p class="aside">The routing, filtering and elevation logic is plain Kotlin with no Android in it — so it can be tested against recorded hikes without walking up a hill.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span class="id">
+      <svg class="mark mark--foot" viewBox="18 18 72 72" aria-hidden="true">
+        <rect x="18" y="18" width="72" height="72" rx="16" fill="#1B4D3E"/>
+        <path d="M30 72 42 48 52 58 66 34 78 44" fill="none" stroke="#E8F1EC"
+              stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      dok2 — GPS track recorder for hiking
+    </span>
+    <span>Licence: TBD, AGPL-3.0 or Apache-2.0</span>
+    <span><a href="https://github.com/iskyd/dok2">github.com/iskyd/dok2</a></span>
+  </div>
+</footer>
+
+<script>
+(function(){
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const W = 1200, H = 780;
+
+  /* ---- terrain field: a couple of summits, a ridge, and some roughness ---- */
+  function field(x, y){
+    const nx = x / W, ny = y / H;
+    let v = 0;
+    v += 1.00 * Math.exp(-(((nx-0.30)**2)/0.050 + ((ny-0.60)**2)/0.032));
+    v += 0.88 * Math.exp(-(((nx-0.74)**2)/0.055 + ((ny-0.26)**2)/0.038));
+    v += 0.46 * Math.exp(-(((nx-0.52)**2)/0.022 + ((ny-0.13)**2)/0.022));
+    v += 0.34 * Math.exp(-(((nx-0.06)**2)/0.030 + ((ny-0.20)**2)/0.040));
+    v += 0.17 * Math.sin(nx*7.4 + ny*3.2);
+    v += 0.11 * Math.cos(nx*4.3 - ny*6.6);
+    v += 0.075 * Math.sin(nx*12.5 + 2.0) * Math.cos(ny*10.5);
+    return v;
+  }
+
+  /* ---- marching squares: one path per contour level ---- */
+  const step = 13;
+  const cols = Math.ceil(W/step) + 1, rows = Math.ceil(H/step) + 1;
+  const val = [];
+  for (let r = 0; r < rows; r++){
+    const row = [];
+    for (let c = 0; c < cols; c++) row.push(field(c*step, r*step));
+    val.push(row);
+  }
+  const CASES = {
+    1:[[3,2]], 2:[[2,1]], 3:[[3,1]], 4:[[0,1]], 5:[[0,3],[2,1]], 6:[[0,2]], 7:[[0,3]],
+    8:[[0,3]], 9:[[0,2]], 10:[[0,1],[3,2]], 11:[[0,1]], 12:[[3,1]], 13:[[2,1]], 14:[[3,2]]
+  };
+  function edgePoint(e, r, c, L, a, b, d, dd){
+    const x0 = c*step, y0 = r*step, x1 = x0+step, y1 = y0+step;
+    let t;
+    if (e === 0){ t = (L-a)/(b-a);  return [x0 + t*step, y0]; }
+    if (e === 1){ t = (L-b)/(d-b);  return [x1, y0 + t*step]; }
+    if (e === 2){ t = (L-dd)/(d-dd); return [x0 + t*step, y1]; }
+    t = (L-a)/(dd-a); return [x0, y0 + t*step];
+  }
+
+  const g = document.getElementById('contours');
+  const levels = [];
+  for (let L = -0.25; L <= 1.75; L += 0.058) levels.push(L);
+
+  levels.forEach(function(L, i){
+    let d = '';
+    for (let r = 0; r < rows-1; r++){
+      for (let c = 0; c < cols-1; c++){
+        const a = val[r][c], b = val[r][c+1], dr = val[r+1][c+1], dd = val[r+1][c];
+        const idx = (a>L?8:0) | (b>L?4:0) | (dr>L?2:0) | (dd>L?1:0);
+        const segs = CASES[idx];
+        if (!segs) continue;
+        for (const [e1, e2] of segs){
+          const p1 = edgePoint(e1, r, c, L, a, b, dr, dd);
+          const p2 = edgePoint(e2, r, c, L, a, b, dr, dd);
+          d += 'M' + p1[0].toFixed(1) + ' ' + p1[1].toFixed(1) + 'L' + p2[0].toFixed(1) + ' ' + p2[1].toFixed(1);
+        }
+      }
+    }
+    if (!d) return;
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const index = (i % 5 === 0);              /* index contour, every fifth line — map convention */
+    p.setAttribute('d', d);
+    p.setAttribute('stroke', index ? 'var(--contour-idx)' : 'var(--contour)');
+    p.setAttribute('stroke-width', index ? 1.5 : 0.9);
+    p.setAttribute('opacity', reduce ? 1 : 0);
+    g.appendChild(p);
+    if (!reduce){
+      p.animate([{opacity:0},{opacity:1}], {duration:900, delay: 90 + i*22, fill:'forwards', easing:'ease-out'});
+    }
+  });
+
+  /* ---- neatline ticks, like the margin of a printed sheet ---- */
+  const neat = document.getElementById('neat');
+  let td = '';
+  for (let x = 0; x <= W; x += 60) td += 'M' + x + ' 0V9M' + x + ' ' + H + 'V' + (H-9);
+  for (let y = 0; y <= H; y += 60) td += 'M0 ' + y + 'H9M' + W + ' ' + y + 'H' + (W-9);
+  const tick = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  tick.setAttribute('d', td);
+  tick.setAttribute('opacity', '.55');
+  neat.appendChild(tick);
+
+  /* ---- the recorded track ---- */
+  const pts = [[70,742],[152,712],[216,682],[250,648],[228,612],[186,590],[196,556],[240,540],
+               [298,532],[332,506],[318,470],[338,440],[384,428],[432,412],[454,378],[430,342],
+               [454,310],[512,298],[568,294],[622,276],[666,248],[702,222],[748,204],[802,212],
+               [850,194],[902,166],[958,148],[1012,138],[1082,118],[1148,92]];
+  function smooth(p){
+    let d = 'M' + p[0][0] + ' ' + p[0][1];
+    for (let i = 0; i < p.length-1; i++){
+      const p0 = p[i-1] || p[0], p1 = p[i], p2 = p[i+1], p3 = p[i+2] || p[p.length-1];
+      const c1x = p1[0] + (p2[0]-p0[0])/6, c1y = p1[1] + (p2[1]-p0[1])/6;
+      const c2x = p2[0] - (p3[0]-p1[0])/6, c2y = p2[1] - (p3[1]-p1[1])/6;
+      d += 'C' + c1x.toFixed(1) + ' ' + c1y.toFixed(1) + ',' + c2x.toFixed(1) + ' ' + c2y.toFixed(1) + ',' + p2[0] + ' ' + p2[1];
+    }
+    return d;
+  }
+  const track = document.getElementById('track');
+  const head = document.getElementById('head');
+  const halo = document.getElementById('head-halo');
+  track.setAttribute('d', smooth(pts));
+  const len = track.getTotalLength();
+  track.style.strokeDasharray = len;
+
+  if (reduce){
+    track.style.strokeDashoffset = 0;
+    const end = track.getPointAtLength(len);
+    head.setAttribute('cx', end.x); head.setAttribute('cy', end.y); head.setAttribute('opacity', 1);
+  } else {
+    track.style.strokeDashoffset = len;
+    const dur = 3400, t0 = performance.now() + 500;
+    (function frame(now){
+      const t = Math.min(1, Math.max(0, (now - t0) / dur));
+      const e = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2)/2;
+      track.style.strokeDashoffset = len * (1 - e);
+      const pt = track.getPointAtLength(len * e);
+      head.setAttribute('cx', pt.x); head.setAttribute('cy', pt.y);
+      halo.setAttribute('cx', pt.x); halo.setAttribute('cy', pt.y);
+      head.setAttribute('opacity', t > 0 ? 1 : 0);
+      halo.setAttribute('opacity', t > 0 ? 0.45 : 0);
+      if (t < 1) requestAnimationFrame(frame);
+    })(performance.now());
+  }
+
+  /* ---- scroll reveals ---- */
+  if (!reduce && 'IntersectionObserver' in window){
+    const io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if (en.isIntersecting){ en.target.classList.add('in'); io.unobserve(en.target); }
+      });
+    }, {rootMargin:'0px 0px -12% 0px'});
+    document.querySelectorAll('.rise').forEach(function(el){ io.observe(el); });
+  } else {
+    document.querySelectorAll('.rise').forEach(function(el){ el.classList.add('in'); });
+  }
+})();
+</script>
+</body>
+</html>
