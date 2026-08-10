@@ -358,6 +358,7 @@ The Settings Map data section shows the active region's name and size.
 - **The style JSON must declare a `sprite` URL even though the app uses no sprites.** MapLibre Native on Android crashes on initialisation without it. Undocumented; costs people hours.
 - The basemap loads from a local file: `VectorSource` with `pmtiles://file://` + the absolute path. No remote tiles, no remote style.
 - The seven basemap layers render exactly the source-layer names in `tilemaker/process.lua` (landuse, water, contour, path, track, peak, hut) — renaming one silently blanks the map.
+- **The label fonts are bundled as PBF glyph ranges in `app/src/main/assets/fonts/`** (NotoSans-Bold and NotoSans-Regular, SIL OFL 1.1; licence in `fonts/OFL-LICENSE.txt`). Two ranges are bundled per font: 0–1023, covering Latin plus Western European accents, and 8192–8447. The second range exists for a single character: U+2026, the ellipsis MapLibre appends when a label exceeds `text-max-width` (default 10 em). Without it, every truncated label silently fails to render — no error surfaces in the app, only `Failed to load glyph range 8192-8447 for font stack ...` in logcat. Bundling a range is a ~30–40 KB APK cost per font; the 4 MB of ranges 0–1023 is the bulk of the font payload.
 - The GL surface is destroyed whenever the map is not visible. See [Battery](#battery).
 
 ### Map screen behaviour

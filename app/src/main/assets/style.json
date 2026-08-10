@@ -2,6 +2,7 @@
   "version": 8,
   "name": "dok2",
   "sprite": "asset://sprites",
+  "glyphs": "asset://fonts/{fontstack}/{range}.pbf",
   "sources": {},
   "layers": [
     {

@@ -40,6 +40,7 @@ import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapLibreMap.OnCameraMoveStartedListener
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.Layer
@@ -53,6 +54,17 @@ import org.maplibre.android.style.layers.PropertyFactory.fillOpacity
 import org.maplibre.android.style.layers.PropertyFactory.lineColor
 import org.maplibre.android.style.layers.PropertyFactory.lineDasharray
 import org.maplibre.android.style.layers.PropertyFactory.lineWidth
+import org.maplibre.android.style.layers.PropertyFactory.textAllowOverlap
+import org.maplibre.android.style.layers.PropertyFactory.textAnchor
+import org.maplibre.android.style.layers.PropertyFactory.textColor
+import org.maplibre.android.style.layers.PropertyFactory.textField
+import org.maplibre.android.style.layers.PropertyFactory.textFont
+import org.maplibre.android.style.layers.PropertyFactory.textHaloColor
+import org.maplibre.android.style.layers.PropertyFactory.textHaloWidth
+import org.maplibre.android.style.layers.PropertyFactory.textIgnorePlacement
+import org.maplibre.android.style.layers.PropertyFactory.textOffset
+import org.maplibre.android.style.layers.PropertyFactory.textSize
+import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.android.style.sources.VectorSource
 import org.maplibre.geojson.Feature
@@ -413,8 +425,8 @@ private fun pmtilesUrl(file: File): String = "pmtiles://file://" + file.absolute
 
 /**
  * The basemap layers for the seven Tilemaker source-layers, in draw order: fills below, then lines,
- * then circles. Water renders as both fill and line. The source-layer names are the contract with
- * the Tilemaker profile and must not be renamed.
+ * then circles, then labels. Water renders as both fill and line. The source-layer names are the
+ * contract with the Tilemaker profile and must not be renamed.
  */
 private fun basemapLayers(): List<Layer> =
     listOf(
@@ -452,6 +464,53 @@ private fun basemapLayers(): List<Layer> =
                 circleStrokeColor(HUT_STROKE_COLOR),
                 circleStrokeWidth(HUT_STROKE_WIDTH),
             ),
+        // Labels after the circles so they draw on top of the dots.
+        SymbolLayer(PEAK_NAME_LAYER_ID, REGION_SOURCE_ID)
+            .withSourceLayer("peak")
+            .withProperties(
+                textField(peakLabel()),
+                textFont(arrayOf("NotoSans-Bold")),
+                textSize(PEAK_NAME_TEXT_SIZE),
+                textColor(PEAK_NAME_COLOR),
+                textHaloColor(TEXT_HALO_COLOR),
+                textHaloWidth(TEXT_HALO_WIDTH),
+                textAnchor("left"),
+                textOffset(TEXT_OFFSET),
+                // Summit names are the one thing the user wants to see at a glance; with the
+                // default
+                // text-allow-overlap=false, MapLibre's placement pass drops every label in the
+                // crowded Alps summit field (while the isolated hut label survives) — verified
+                // empirically on device. Allow overlap so the names always draw.
+                textAllowOverlap(true),
+                textIgnorePlacement(true),
+            )
+            .also { it.setMinZoom(PEAK_NAME_MIN_ZOOM) },
+        SymbolLayer(HUT_NAME_LAYER_ID, REGION_SOURCE_ID)
+            .withSourceLayer("hut")
+            .withProperties(
+                textField(Expression.coalesce(Expression.get("name"), Expression.literal(""))),
+                textFont(arrayOf("NotoSans-Regular")),
+                textSize(HUT_NAME_TEXT_SIZE),
+                textColor(HUT_NAME_COLOR),
+                textHaloColor(TEXT_HALO_COLOR),
+                textHaloWidth(TEXT_HALO_WIDTH),
+                textAnchor("left"),
+                textOffset(TEXT_OFFSET),
+            )
+            .also { it.setMinZoom(HUT_NAME_MIN_ZOOM) },
+    )
+
+/**
+ * Peak label: the bold summit name. Coalesced so peaks without a `name` attribute render an empty
+ * label instead of dropping the expression (verified on device: a raw `get("name")` that errors
+ * kills every label in the layer).
+ */
+private fun peakLabel(): Expression =
+    Expression.format(
+        Expression.formatEntry(
+            Expression.coalesce(Expression.get("name"), Expression.literal("")),
+            Expression.FormatOption.formatTextFont(arrayOf("NotoSans-Bold")),
+        )
     )
 
 private fun removeBasemapLayers(style: Style) {
@@ -484,6 +543,8 @@ private const val PATH_LAYER_ID = "path-line"
 private const val TRACK_FEATURE_LAYER_ID = "track-line"
 private const val PEAK_LAYER_ID = "peak-circle"
 private const val HUT_LAYER_ID = "hut-circle"
+private const val PEAK_NAME_LAYER_ID = "peak-name"
+private const val HUT_NAME_LAYER_ID = "hut-name"
 private val BASEMAP_LAYER_IDS =
     listOf(
         LANDUSE_LAYER_ID,
@@ -494,6 +555,8 @@ private val BASEMAP_LAYER_IDS =
         TRACK_FEATURE_LAYER_ID,
         PEAK_LAYER_ID,
         HUT_LAYER_ID,
+        PEAK_NAME_LAYER_ID,
+        HUT_NAME_LAYER_ID,
     )
 
 private const val LANDUSE_FILL_COLOR = "#D6E4C0"
@@ -520,3 +583,13 @@ private const val HUT_COLOR = "#6D4C41"
 private const val HUT_RADIUS = 3.5f
 private const val HUT_STROKE_COLOR = "#FFFFFF"
 private const val HUT_STROKE_WIDTH = 1f
+private const val PEAK_NAME_TEXT_SIZE = 12f
+private const val PEAK_NAME_COLOR = "#37474F"
+private const val PEAK_NAME_MIN_ZOOM = 11f
+private const val HUT_NAME_TEXT_SIZE = 11f
+private const val HUT_NAME_COLOR = "#4E342E"
+private const val HUT_NAME_MIN_ZOOM = 12f
+private const val TEXT_HALO_COLOR = "#FFFFFF"
+private const val TEXT_HALO_WIDTH = 1.5f
+// Offset (in ems) right of the dot so the label clears the circle rather than sitting on it.
+private val TEXT_OFFSET = arrayOf(0.5f, 0f)
