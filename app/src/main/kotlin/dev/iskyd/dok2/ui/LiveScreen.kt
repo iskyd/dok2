@@ -115,11 +115,11 @@ fun LiveScreen(trackRepository: TrackRepository) {
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text(
-                    text = if (barometerCalibrated) "▲ ${formatDistance(gainM)}" else "▲ —",
+                    text = if (barometerCalibrated) "▲ ${formatElevation(gainM)}" else "▲ —",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
-                    text = if (barometerCalibrated) "▼ ${formatDistance(lossM)}" else "▼ —",
+                    text = if (barometerCalibrated) "▼ ${formatElevation(lossM)}" else "▼ —",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -253,6 +253,10 @@ private fun formatDistance(distanceM: Double): String =
     } else {
         String.format(Locale.ROOT, "%.0f m", distanceM)
     }
+
+/** Elevation figures are always metres — unlike [formatDistance], never kilometres. */
+private fun formatElevation(elevationM: Double): String =
+    String.format(Locale.ROOT, "%,.0f m", elevationM)
 
 private fun formatDuration(elapsedTimeS: Long): String {
     val hours = elapsedTimeS / 3600

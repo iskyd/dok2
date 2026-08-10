@@ -118,8 +118,8 @@ fun TrackDetailDialog(track: Track, trackRepository: TrackRepository, onDismiss:
                 )
                 Spacer(Modifier.height(8.dp))
                 StatsRow(
-                    "Elevation gain" to (gainM?.let { "▲ ${formatDistance(it)}" } ?: "—"),
-                    "Elevation loss" to (lossM?.let { "▼ ${formatDistance(it)}" } ?: "—"),
+                    "Elevation gain" to (gainM?.let { "▲ ${formatElevation(it)}" } ?: "—"),
+                    "Elevation loss" to (lossM?.let { "▼ ${formatElevation(it)}" } ?: "—"),
                 )
                 Spacer(Modifier.height(8.dp))
                 StatsRow(
@@ -289,6 +289,10 @@ private fun formatDistance(distanceM: Double): String =
     } else {
         String.format(Locale.ROOT, "%.0f m", distanceM)
     }
+
+/** Elevation figures are always metres — unlike [formatDistance], never kilometres. */
+private fun formatElevation(elevationM: Double): String =
+    String.format(Locale.ROOT, "%,.0f m", elevationM)
 
 private fun formatDuration(elapsedTimeS: Long): String {
     val hours = elapsedTimeS / 3600

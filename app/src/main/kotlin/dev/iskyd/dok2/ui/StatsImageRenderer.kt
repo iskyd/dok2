@@ -60,7 +60,7 @@ object StatsImageRenderer {
         val values =
             listOf(
                 formatDistance(distanceM),
-                gainM?.let { "▲ " + formatDistance(it) } ?: "—",
+                gainM?.let { "▲ " + formatElevation(it) } ?: "—",
                 formatDuration(elapsedTimeS),
             )
         for (i in values.indices) {
@@ -191,6 +191,10 @@ object StatsImageRenderer {
         } else {
             String.format(Locale.ROOT, "%.0f m", distanceM)
         }
+
+    /** Elevation figures are always metres — unlike [formatDistance], never kilometres. */
+    private fun formatElevation(elevationM: Double): String =
+        String.format(Locale.ROOT, "%,.0f m", elevationM)
 
     private fun formatDuration(elapsedTimeS: Long): String {
         val hours = elapsedTimeS / 3600

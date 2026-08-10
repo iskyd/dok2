@@ -316,7 +316,7 @@ private fun TrackCard(
                     )
                     summary.gainDemM?.let {
                         Text(
-                            text = "▲ ${formatDistance(it)}",
+                            text = "▲ ${formatElevation(it)}",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -372,6 +372,10 @@ private fun formatDistance(distanceM: Double): String =
     } else {
         String.format(Locale.ROOT, "%.0f m", distanceM)
     }
+
+/** Elevation figures are always metres — unlike [formatDistance], never kilometres. */
+private fun formatElevation(elevationM: Double): String =
+    String.format(Locale.ROOT, "%,.0f m", elevationM)
 
 private fun formatDuration(elapsedTimeS: Long): String {
     val hours = elapsedTimeS / 3600
