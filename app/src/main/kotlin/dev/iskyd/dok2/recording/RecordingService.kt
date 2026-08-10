@@ -30,6 +30,7 @@ import dev.iskyd.dok2.data.db.WaypointEntity
 import dev.iskyd.dok2.data.repo.TrackRepository
 import dev.iskyd.dok2.domain.elevation.Barometer
 import dev.iskyd.dok2.domain.elevation.ElevationRateGate
+import dev.iskyd.dok2.domain.elevation.ElevationResampler
 import dev.iskyd.dok2.domain.elevation.ElevationStats
 import dev.iskyd.dok2.domain.filter.FilterChain
 import dev.iskyd.dok2.domain.filter.FilterResult
@@ -544,8 +545,14 @@ class RecordingService : Service() {
         trackRepository.updateDemAltitudes(id, altDemBySeq)
 
         val demStats = ElevationStats()
-        for (altDemM in altDemBySeq.values) {
-            demStats.add(altDemM)
+        // Gain/loss is computed from a ~15 m-resampled subset of the points, per DOCUMENTATION.md
+        // (Elevation — Final). Fed at full 3 s resolution, sub-grid DEM undulation (GNSS noise
+        // resolved by the coarse SRTM surface) double-books through the hysteresis and inflates
+        // gain/loss symmetrically on mountainous tracks. Per-point altitudes are still written
+        // above for every point; only the accumulator is sub-sampled.
+        val resampled = ElevationResampler.indices(points)
+        for (seq in resampled) {
+            altDemBySeq[seq.toLong()]?.let { demStats.add(it) }
         }
         val hasDem = altDemBySeq.isNotEmpty()
         val barometerFed = elevationStats.referenceM != null
