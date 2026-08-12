@@ -15,7 +15,7 @@ Pre-alpha. Nothing works yet. See [DOCUMENTATION.md](DOCUMENTATION.md) for the d
 
 ### Obtainium (recommended)
 
-[![Get it on Obtainium](https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png)](obtainium://add/https://github.com/iskyd/dok2)
+[![Get it on Obtainium](https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png)](http://apps.obtainium.imranr.dev/redirect.html?r=obtainium://app/%7B%22id%22%3A%22dev.iskyd.dok2%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fiskyd%2Fdok2%22%2C%22author%22%3A%22iskyd%22%2C%22name%22%3A%22dok2%22%7D)
 
 Or add manually: `https://github.com/iskyd/dok2` or `https://codeberg.org/iskyd/dok2`
 
