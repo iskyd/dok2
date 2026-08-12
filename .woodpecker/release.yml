@@ -1,0 +1,42 @@
+when:
+  event: push
+  branch: main
+
+steps:
+  - name: test
+    image: eclipse-temurin:17-jdk
+    commands:
+      - chmod +x gradlew
+      - ./gradlew check
+
+  - name: build
+    image: eclipse-temurin:17-jdk
+    commands:
+      - ./gradlew :app:assembleRelease
+
+  - name: release
+    image: alpine
+    commands:
+      - apk add --no-cache curl jq
+      - |
+        source version.properties
+        VERSION="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}"
+        APK_PATH="app/build/outputs/apk/release/app-release-unsigned.apk"
+        APK_NAME="dok2-${VERSION}.apk"
+
+        # Create release via Codeberg API
+        RELEASE=$(curl -s -X POST \
+          -H "Authorization: token $CODEBERG_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{\"tag_name\": \"v${VERSION}\", \"name\": \"dok2 v${VERSION}\", \"body\": \"See CHANGELOG.md for details.\", \"prerelease\": true}" \
+          "https://codeberg.org/api/v1/repos/${CI_REPO}/releases")
+
+        RELEASE_ID=$(echo "$RELEASE" | jq -r '.id')
+
+        # Upload APK
+        curl -s -X POST \
+          -H "Authorization: token $CODEBERG_TOKEN" \
+          -F "attachment=@${APK_PATH};filename=${APK_NAME}" \
+          "https://codeberg.org/api/v1/repos/${CI_REPO}/releases/${RELEASE_ID}/assets"
+    secrets:
+      - codeberg_token

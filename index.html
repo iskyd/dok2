@@ -235,8 +235,8 @@
       <h1>An offline GPS track recorder for hiking.</h1>
       <p class="lede">It records where you walked and draws it on a map that works with no signal. Everything stays on the phone. No account, no server, no network permission.</p>
       <div class="cta">
-        <a class="btn btn--solid" href="https://github.com/iskyd/dok2">View on GitHub</a>
-        <a class="btn btn--ghost" href="https://github.com/iskyd/dok2/blob/main/DOCUMENTATION.md">Read the documentation</a>
+        <a class="btn btn--solid" href="https://github.com/iskyd/dok2/releases">Download APK</a>
+        <a class="btn btn--ghost" href="https://github.com/iskyd/dok2">View on GitHub</a>
       </div>
       <div class="hero__foot">
         <span>Android 8.0+</span><span>Kotlin</span><span>MapLibre · PMTiles</span><span>SRTM elevation</span><span>GPX export</span>
@@ -253,7 +253,7 @@
 <div class="status">
   <div class="wrap">
     <b>Status</b>
-    <span>Pre-alpha. Nothing works yet — the design is written down, the build has started, and there is nothing to install.</span>
+    <span>Pre-alpha. Core recording is under development. Install via Obtainium to track releases.</span>
   </div>
 </div>
 
@@ -448,7 +448,21 @@ else
         </li>
       </ol>
       <div class="rise">
-        <p class="eyebrow" style="margin-bottom:14px">Build from source</p>
+        <p class="eyebrow" style="margin-bottom:14px">Install</p>
+        <a href="obtainium://add/https://github.com/iskyd/dok2" style="display:inline-block;margin-bottom:18px">
+          <img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" alt="Get it on Obtainium" style="height:56px">
+        </a>
+        <ul class="listing">
+          <li>
+            <h3>Add manually</h3>
+            <p><code>https://github.com/iskyd/dok2</code> or <code>https://codeberg.org/iskyd/dok2</code></p>
+          </li>
+          <li>
+            <h3>Direct download</h3>
+            <p>Grab the latest APK from <a href="https://github.com/iskyd/dok2/releases">GitHub</a> or <a href="https://codeberg.org/iskyd/dok2/releases">Codeberg</a> releases.</p>
+          </li>
+        </ul>
+        <p class="eyebrow" style="margin:28px 0 14px">Build from source</p>
         <pre class="pre pre--light">./gradlew :app:assembleDebug
 ./gradlew :app:installDebug
 

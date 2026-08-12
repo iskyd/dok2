@@ -1,8 +1,17 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+
+val versionProps = Properties().apply {
+    file("../version.properties").inputStream().use { load(it) }
+}
+val versionMajor = versionProps["VERSION_MAJOR"].toString().toInt()
+val versionMinor = versionProps["VERSION_MINOR"].toString().toInt()
+val versionPatch = versionProps["VERSION_PATCH"].toString().toInt()
 
 android {
     namespace = "dev.iskyd.dok2"
@@ -12,8 +21,8 @@ android {
         applicationId = "dev.iskyd.dok2"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = versionMajor * 10000 + versionMinor * 100 + versionPatch
+        versionName = "$versionMajor.$versionMinor.$versionPatch"
     }
 
     buildTypes {

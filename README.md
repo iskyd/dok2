@@ -11,6 +11,18 @@ No social feed, no live location sharing, no turn-by-turn navigation, no trainin
 
 Pre-alpha. Nothing works yet. See [DOCUMENTATION.md](DOCUMENTATION.md) for the design and the build order.
 
+## Install
+
+### Obtainium (recommended)
+
+[![Get it on Obtainium](https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png)](obtainium://add/https://github.com/iskyd/dok2)
+
+Or add manually: `https://github.com/iskyd/dok2` or `https://codeberg.org/iskyd/dok2`
+
+### Manual download
+
+Download the latest APK from [GitHub Releases](https://github.com/iskyd/dok2/releases) or [Codeberg Releases](https://codeberg.org/iskyd/dok2/releases).
+
 ## Requirements
 
 - Android 8.0 (API 26) or later

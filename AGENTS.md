@@ -118,6 +118,16 @@ Adding a dependency requires justification in the PR. The bar is high: this app 
 
 Conventional commits (`feat:`, `fix:`, `perf:`, `refactor:`, `test:`, `docs:`). One logical change per commit. `perf:` commits must state the measured effect, not the intended one.
 
+### Branching and releases
+
+- **Always work on a feature branch.** Never commit directly to `main`. Branch names: `feature/description`, `fix/description`, `refactor/description`.
+- **Create a pull request to merge into `main`.** PR merges trigger the CI pipeline that builds and publishes a release APK.
+- **Update the version before merging.** Edit `version.properties` in the repository root:
+  - **Patch** (0.1.0 → 0.1.1): bug fixes, minor tweaks
+  - **Minor** (0.1.0 → 0.2.0): new features, backward-compatible changes
+  - **Major** (0.1.0 → 1.0.0): breaking changes, major milestones
+- **Update the changelog.** Add an entry to `CHANGELOG.md` under `[Unreleased]` describing what changed. When the PR merges, the CI uses this for the release notes. Follow [Keep a Changelog](https://keepachangelog.com/) format.
+
 ---
 
 ## Where things are
