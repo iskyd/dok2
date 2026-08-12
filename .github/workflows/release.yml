@@ -48,7 +48,7 @@ jobs:
              app/build/outputs/apk/release/dok2-${{ steps.version.outputs.version }}.apk
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v4
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: dok2 v${{ steps.version.outputs.version }}
