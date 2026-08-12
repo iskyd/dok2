@@ -5,6 +5,9 @@ on:
     types: [closed]
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     if: github.event.pull_request.merged == true
@@ -45,7 +48,7 @@ jobs:
              app/build/outputs/apk/release/dok2-${{ steps.version.outputs.version }}.apk
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v4
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: dok2 v${{ steps.version.outputs.version }}
@@ -53,5 +56,3 @@ jobs:
           files: app/build/outputs/apk/release/dok2-${{ steps.version.outputs.version }}.apk
           draft: false
           prerelease: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
